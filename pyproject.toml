@@ -1,0 +1,28 @@
+[project]
+name = "x-automation"
+version = "0.1.0"
+description = "AI Content Research, Creation, Curation & Publisher for X."
+requires-python = ">=3.11"
+readme = "README.md"
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+addopts = "-ra -q --basetemp=./.tmp_pytest"
+testpaths = ["tests"]
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "N", "W"]
+ignore = ["E501"]  # line length handled by formatter
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["N"]
+# app.py imports the x_auto.* packages after a deliberate sys.path
+# tweak. The ordering is load-bearing, not accidental.
+"src/x_auto/app.py" = ["E402"]
+# Same sys.path tweak in standalone scripts under scripts/.
+"scripts/cleanup_extra_cashtags.py" = ["E402"]

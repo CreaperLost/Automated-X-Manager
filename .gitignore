@@ -1,0 +1,53 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.pytest_tmp/
+.tmp_pytest/
+tmp_pytest/
+.ruff_cache/
+.mypy_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+build/
+dist/
+*.egg-info/
+
+# Virtual env
+.venv/
+venv/
+env/
+
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+*.pem
+*.key
+*.p12
+*.pfx
+*credentials*.json
+
+# Runtime state
+data/*.db
+data/*.db-*
+data/*.sqlite
+data/*.sqlite-*
+data/oauth_tokens.json
+data/media_cache/
+*.log
+.tmp_*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor and local agent metadata
+.vscode/
+.idea/
+.codex/
