@@ -8,10 +8,40 @@ cd "$(dirname "$0")/.."
 REPO_ROOT="$(pwd)"
 echo "==> Repo: $REPO_ROOT"
 
-# venv
-if [[ ! -x .venv/bin/python ]]; then
-    echo "==> Creating .venv"
-    python3 -m venv .venv
+# venv (the application uses Python 3.11-only features such as datetime.UTC)
+python_is_supported() {
+    "$1" -c 'import sys; raise SystemExit(sys.version_info < (3, 11))' \
+        >/dev/null 2>&1
+}
+
+find_supported_python() {
+    local candidate
+    for candidate in python3.11 python3.12 python3.13 python3.14 python3; do
+        if command -v "$candidate" >/dev/null 2>&1 && python_is_supported "$candidate"; then
+            command -v "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+if [[ -x .venv/bin/python ]] && python_is_supported .venv/bin/python; then
+    echo "==> .venv present ($(.venv/bin/python --version 2>&1))"
+else
+    PYTHON_BIN="$(find_supported_python || true)"
+    if [[ -z "$PYTHON_BIN" ]]; then
+        echo "Python 3.11 or newer is required, but no compatible interpreter was found." >&2
+        echo "Install Python 3.11+ and re-run this script." >&2
+        exit 1
+    fi
+
+    if [[ -d .venv ]]; then
+        echo "==> Rebuilding incompatible .venv with $($PYTHON_BIN --version 2>&1)"
+        "$PYTHON_BIN" -m venv --clear .venv
+    else
+        echo "==> Creating .venv with $($PYTHON_BIN --version 2>&1)"
+        "$PYTHON_BIN" -m venv .venv
+    fi
 fi
 
 # deps

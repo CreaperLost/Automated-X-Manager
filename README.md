@@ -1,11 +1,11 @@
 # X-Automation
 
 X-Automation is a local Streamlit application for researching posts on X,
-turning selected sources into original drafts, and publishing or scheduling
-them with explicit control over every paid action.
+turning selected sources into original drafts, and publishing them with
+explicit control over every paid action.
 
 The application runs on your computer. API credentials, OAuth tokens, fetched
-posts, drafts, schedules, and uploaded media remain in local ignored files.
+posts, drafts, and uploaded media remain in local ignored files.
 
 ## Workflow
 
@@ -16,8 +16,7 @@ The interface has three views:
 2. **Create** — select one source, choose **Rephrase** or **Original take**,
    generate one draft, edit it, and optionally attach a source or personal
    image.
-3. **Queue** — manage drafts, scheduled posts, published posts, failures, and
-   post history.
+3. **Queue** — manage drafts, published posts, failures, and post history.
 
 Fetching and AI generation only happen after you click their buttons. The app
 does not automatically fetch sources or generate drafts.
@@ -107,6 +106,27 @@ Public examples are provided as `config/accounts.example.yaml` and
 
 ## Daily use
 
+### One-click start and stop in Codex
+
+The checked-in Codex local environment adds **Run** and **Stop** actions to the
+desktop app's top bar. **Run** starts X-Automation in the background and waits
+for its health check; **Stop** ends only the server started by that action.
+
+Run the bootstrap once before using the actions:
+
+```bash
+bash scripts/boot.sh
+```
+
+You can use the same commands outside Codex:
+
+```bash
+bash scripts/start.sh
+bash scripts/stop.sh
+```
+
+Runtime output is written to `data/x-automation.log`.
+
 1. Open **Sources**.
 2. Reuse a saved source or click **Fetch recent**.
 3. Select a source and open **Create**.
@@ -114,7 +134,7 @@ Public examples are provided as `config/accounts.example.yaml` and
 5. Optionally select a source image or one of your own images.
 6. Click **Generate draft**.
 7. Edit and review the post.
-8. Choose **Post now** or **Schedule**.
+8. Choose **Post now**.
 
 Source posts are inspiration only. The app does not quote third-party posts
 when publishing.
@@ -130,11 +150,9 @@ These files are created locally and ignored by Git:
 | `data/projects.csv` | Personal projects and URLs |
 | `data/oauth_tokens.json` | X OAuth access and refresh tokens |
 | `data/state.db` | Sources, drafts, post history, and application state |
-| `data/scheduler.sqlite` | Persistent scheduled jobs |
-| `data/media_cache/` | Downloaded and uploaded image cache |
-| `data/scheduler.lock` | Local scheduler process lock |
+| `data/media_cache/` | Image and video library, organized into one folder per project |
 
-Back up the `data/` directory if you need to preserve drafts and schedules.
+Back up the `data/` directory if you need to preserve drafts and media.
 Do not publish that backup.
 
 ## Running manually

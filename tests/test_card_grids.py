@@ -262,7 +262,7 @@ get_settings.cache_clear()
 settings = get_settings()
 x_client = MagicMock()
 ai = MagicMock()
-render(settings, db, x_client, ai, on_schedule=lambda *a, **k: None)
+render(settings, db, x_client, ai)
 """
     at = AppTest.from_string(script)
     at.run()

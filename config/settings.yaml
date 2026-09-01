@@ -13,9 +13,6 @@ x:
   - replies
   - retweets
   rate_limit_buffer_seconds: 5
-schedule:
-  max_lookahead_days: 30
-  min_lead_minutes: 5
 ui:
   page_title: X-Automation
   cost_warning_threshold_usd: 1.0

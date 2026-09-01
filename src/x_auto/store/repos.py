@@ -12,7 +12,7 @@ from datetime import datetime
 from pathlib import Path
 
 from .db import apply_schema, connect
-from .models import Account, Draft, MediaUpload, Project, Schedule, Tweet
+from .models import Account, Draft, MediaUpload, Project, Tweet
 
 # ---- helpers ----------------------------------------------------------------
 
@@ -88,24 +88,11 @@ def _row_to_draft(row: sqlite3.Row) -> Draft:
         status=row["status"],
         created_at=_parse_dt(row["created_at"]),
         finalized_at=_parse_dt(row["finalized_at"]),
-        scheduled_at=_parse_dt(row["scheduled_at"]),
         posted_at=_parse_dt(row["posted_at"]),
         x_tweet_id=row["x_tweet_id"],
         x_reply_id=row["x_reply_id"],
         cost_usd=row["cost_usd"],
         error=row["error"],
-    )
-
-
-def _row_to_schedule(row: sqlite3.Row) -> Schedule:
-    return Schedule(
-        id=row["id"],
-        draft_id=row["draft_id"],
-        fire_at=_parse_dt(row["fire_at"]) or datetime.min,
-        status=row["status"],
-        attempts=row["attempts"],
-        last_error=row["last_error"],
-        created_at=_parse_dt(row["created_at"]),
     )
 
 
@@ -324,7 +311,7 @@ class Database:
             UPDATE drafts SET
                 body=?, link_url=?, quote_tweet_id=?, writing_mode=?,
                 image_paths=?, tone=?, status=?,
-                finalized_at=?, scheduled_at=?, posted_at=?,
+                finalized_at=?, posted_at=?,
                 x_tweet_id=?, x_reply_id=?, cost_usd=?, error=?
             WHERE id=?
             """,
@@ -337,7 +324,6 @@ class Database:
                 draft.tone,
                 draft.status,
                 draft.finalized_at.isoformat(sep=" ") if draft.finalized_at else None,
-                draft.scheduled_at.isoformat(sep=" ") if draft.scheduled_at else None,
                 draft.posted_at.isoformat(sep=" ") if draft.posted_at else None,
                 draft.x_tweet_id,
                 draft.x_reply_id,
@@ -378,66 +364,6 @@ class Database:
             "SELECT COALESCE(SUM(cost_usd), 0.0) AS s FROM post_log"
         ).fetchone()
         return float(row["s"] or 0.0)
-
-    # ---- schedules ----
-    def create_schedule(self, draft_id: int, fire_at: datetime) -> int:
-        cur = self._conn.execute(
-            "INSERT INTO schedules(draft_id, fire_at) VALUES (?, ?)",
-            (draft_id, fire_at.isoformat(sep=" ")),
-        )
-        return int(cur.lastrowid)
-
-    def list_schedules(
-        self, status: str | None = None, limit: int = 50
-    ) -> list[Schedule]:
-        if status:
-            rows = self._conn.execute(
-                "SELECT * FROM schedules WHERE status = ? ORDER BY fire_at LIMIT ?",
-                (status, limit),
-            ).fetchall()
-        else:
-            rows = self._conn.execute(
-                "SELECT * FROM schedules ORDER BY fire_at LIMIT ?", (limit,)
-            ).fetchall()
-        return [_row_to_schedule(r) for r in rows]
-
-    def next_pending_schedule(self) -> Schedule | None:
-        row = self._conn.execute(
-            "SELECT * FROM schedules WHERE status='pending' "
-            "ORDER BY fire_at LIMIT 1"
-        ).fetchone()
-        return _row_to_schedule(row) if row else None
-
-    def mark_schedule_fired(self, schedule_id: int) -> None:
-        self._conn.execute(
-            "UPDATE schedules SET status='fired' WHERE id=?", (schedule_id,)
-        )
-
-    def mark_schedule_failed(self, schedule_id: int, error: str) -> None:
-        self._conn.execute(
-            "UPDATE schedules SET status='failed', attempts=attempts+1, "
-            "last_error=? WHERE id=?",
-            (error, schedule_id),
-        )
-
-    def mark_schedule_pending_late(self, schedule_id: int) -> None:
-        self._conn.execute(
-            "UPDATE schedules SET attempts=attempts+1, last_error='fired late' "
-            "WHERE id=?",
-            (schedule_id,),
-        )
-
-    def reschedule(self, schedule_id: int, fire_at: datetime) -> None:
-        self._conn.execute(
-            "UPDATE schedules SET fire_at=?, status='pending', last_error=NULL "
-            "WHERE id=?",
-            (fire_at.isoformat(sep=" "), schedule_id),
-        )
-
-    def cancel_schedule(self, schedule_id: int) -> None:
-        self._conn.execute(
-            "UPDATE schedules SET status='cancelled' WHERE id=?", (schedule_id,)
-        )
 
     # ---- media_uploads ----
     def register_media_upload(self, entry: MediaUpload) -> int:

@@ -27,7 +27,6 @@ import streamlit as st  # noqa: E402  (import after sys.path tweak)
 from x_auto.ai.client import AIClient
 from x_auto.ai.projects import sync_projects
 from x_auto.config import get_settings
-from x_auto.scheduler import runner as scheduler_runner
 from x_auto.store.repos import Database
 from x_auto.ui.layout import render_sidebar
 from x_auto.ui.tab_create import render as render_create
@@ -48,8 +47,7 @@ def _bootstrap() -> tuple:
     meter = SessionMeter()
     x_client = XClient(settings, token_manager=token_manager, meter=meter)
     ai = AIClient(settings)
-    scheduler = scheduler_runner.start(settings, db, x_client)
-    return settings, db, x_client, ai, scheduler, token_manager
+    return settings, db, x_client, ai, token_manager
 
 
 def _inject_active_tab_css() -> None:
@@ -75,7 +73,7 @@ def _inject_active_tab_css() -> None:
 
 
 def main() -> None:
-    settings, db, x_client, ai, _scheduler, _token_manager = _bootstrap()
+    settings, db, x_client, ai, _token_manager = _bootstrap()
     st.set_page_config(
         page_title=settings.ui.page_title,
         layout="wide",
@@ -101,34 +99,12 @@ def main() -> None:
         label_visibility="collapsed",
     ) or "Sources"
 
-    def schedule(draft_id, fire_at):
-        return scheduler_runner.schedule_draft(
-            settings, db, x_client, draft_id, fire_at
-        )
-
-    def reschedule(schedule_id, draft_id, fire_at):
-        return scheduler_runner.reschedule_draft(
-            settings, db, x_client, schedule_id, draft_id, fire_at
-        )
-
-    def cancel_schedule(schedule_id, draft_id):
-        return scheduler_runner.cancel_scheduled_draft(
-            settings, db, x_client, schedule_id, draft_id
-        )
     if view == "Sources":
         render_sources(settings, db, x_client)
     elif view == "Create":
-        render_create(settings, db, ai, x_client=x_client, on_schedule=schedule)
+        render_create(settings, db, ai, x_client=x_client)
     else:
-        render_publish(
-            settings,
-            db,
-            x_client,
-            ai,
-            on_schedule=schedule,
-            on_reschedule=reschedule,
-            on_cancel_schedule=cancel_schedule,
-        )
+        render_publish(settings, db, x_client, ai)
 
 
 if __name__ == "__main__":

@@ -14,6 +14,7 @@ import yaml
 from ..ai.projects import csv_path, load_csv, sync_projects, write_csv
 from ..config import Settings, load_accounts, write_accounts
 from ..store.repos import Database
+from ..utils.media_library import ensure_project_media_dirs
 
 MODEL_OPTIONS = [
     "MiniMax-M3",
@@ -190,6 +191,10 @@ def _save_projects(settings: Settings, db: Database, editor_key: str) -> None:
     projects = _rows_to_projects(st.session_state[editor_key + "_widget"])
     write_csv(csv_path(settings), projects)
     sync_projects(settings, db)
+    ensure_project_media_dirs(
+        settings.data_dir / "media_cache",
+        (project["name"] for project in projects),
+    )
     st.session_state[editor_key] = _projects_to_rows(projects)
     st.toast(f"Saved {len(projects)} project(s)", icon="✅")
 
