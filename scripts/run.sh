@@ -4,4 +4,5 @@
 #     streamlit run src/x_auto/app.py
 set -euo pipefail
 cd "$(dirname "$0")/.."
+export STREAMLIT_GLOBAL_DEVELOPMENT_MODE=false
 exec streamlit run src/x_auto/app.py "$@"

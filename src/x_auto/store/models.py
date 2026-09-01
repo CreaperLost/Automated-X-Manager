@@ -7,6 +7,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, HttpUrl
 
 TweetStatus = Literal["new", "selected", "archived"]
+WritingMode = Literal["rephrase", "original_take"]
 DraftStatus = Literal["draft", "final", "scheduled", "posted", "failed"]
 PostLogResult = Literal["success", "failed", "rate_limited", "auth_error"]
 ScheduleStatus = Literal["pending", "fired", "failed", "cancelled"]
@@ -26,6 +27,10 @@ class Tweet(BaseModel):
     text: str
     created_at: datetime
     public_metrics: dict[str, int] = Field(default_factory=dict)
+    quote_tweet_id: str | None = None
+    quote_tweet_text: str | None = None
+    quote_tweet_author_id: str | None = None
+    source_image_url: str | None = None
     fetched_at: datetime | None = None
     status: TweetStatus = "new"
 
@@ -42,6 +47,8 @@ class Draft(BaseModel):
     source_tweet_id: str | None = None
     body: str
     link_url: str | None = None
+    quote_tweet_id: str | None = None
+    writing_mode: WritingMode = "rephrase"
     image_paths: list[str] = Field(default_factory=list)
     tone: str = ""
     status: DraftStatus = "draft"

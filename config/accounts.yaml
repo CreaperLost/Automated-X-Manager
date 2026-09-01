@@ -1,4 +1,0 @@
-# Pool of X handles to monitor.
-# Add one `- handle: <username>` per line. Lines starting with `#` are ignored.
-- handle: Exsa_mui
-- handle: SkyIsTheTaker

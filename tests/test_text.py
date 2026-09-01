@@ -1,6 +1,5 @@
 """URL detection and character counting."""
 from x_auto.utils.text import (
-    X_MAX_CASHTAGS_PER_POST,
     X_MAX_POST_CHARS,
     contains_url,
     count_cashtags,
@@ -128,6 +127,11 @@ class TestValidatePostBody:
         errs = validate_post_body("see https://x.com for the deal")
         assert any(e.code == "url_in_body" for e in errs)
 
+    def test_url_in_reply_is_allowed(self):
+        assert validate_post_body(
+            "See https://x.com for the deal", role="reply", allow_url=True
+        ) == []
+
     def test_two_cashtags_blocked(self):
         errs = validate_post_body("markets split between $NVDA and $MRVL today")
         cashtag_errs = [e for e in errs if e.code == "too_many_cashtags"]
@@ -141,7 +145,7 @@ class TestValidatePostBody:
         # The original report: ``$175k weekly pool`` + ``$25k of that``
         # + ``$NVDA`` -- 3 cashtags. Must be blocked.
         body = (
-            "Ondo Perps extended USDC rewards 6 more weeks, keeping the "
+            "Atlas Markets extended USDC rewards 6 more weeks, keeping the "
             "$175k weekly pool intact. $25k of that gets split across "
             "$NVDA and MRVL markets."
         )

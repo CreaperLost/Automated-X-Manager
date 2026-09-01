@@ -1,6 +1,6 @@
 """Shared "post a draft" workflow.
 
-Both the Publish tab (one-click "Post" on a draft card) and the
+Both Queue (one-click "Post" on a draft card) and the
 scheduler's fire-job need to: upload any attached images, create the
 main post, create the reply (if there's a project link), update the
 draft row, and log the post. This module centralises that flow so we
@@ -37,6 +37,7 @@ import httpx
 from ..config import Settings
 from ..store.models import Draft
 from ..store.repos import Database
+from ..utils.text import validate_post_body
 from .client import API_BASE, USER_AGENT, XClient
 from .costs import estimate_post_cost
 from .media import upload_image_cached
@@ -51,6 +52,10 @@ class PublishResult:
     cost_usd: float
 
 
+class PublishValidationError(ValueError):
+    """A deterministic local rule failed before any X write."""
+
+
 async def publish_draft(
     settings: Settings,
     db: Database,
@@ -63,6 +68,22 @@ async def publish_draft(
     underlying X client raises; the caller decides how to surface
     them.
     """
+    errors = validate_post_body(draft.body, role="main")
+    if draft.link_url:
+        errors.extend(
+            validate_post_body(draft.link_url, role="reply", allow_url=True)
+        )
+    if errors:
+        raise PublishValidationError("; ".join(error.message for error in errors))
+
+    # X rejects API quotes of arbitrary third-party posts with 403 unless the
+    # authenticated user authored or was mentioned in the quoted post. Sources
+    # in this app are monitored third-party accounts, so legacy quote IDs are
+    # inspiration metadata only and must not be included in the write payload.
+    if draft.quote_tweet_id:
+        draft.quote_tweet_id = None
+        db.update_draft(draft)
+
     # Upload any attached images, reusing cached media_ids when fresh.
     media_ids: list[str] = []
     for p in draft.image_paths:
@@ -79,7 +100,8 @@ async def publish_draft(
     # Main post (no inline URL — that's the whole point of the
     # main+reply split).
     x_tweet_id = await x_client.create_post(
-        draft.body, media_ids=media_ids or None
+        draft.body,
+        media_ids=media_ids or None,
     )
 
     # Reply post carries the project link in a separate (cheap) tweet.

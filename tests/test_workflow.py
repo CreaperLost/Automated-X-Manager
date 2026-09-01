@@ -39,11 +39,11 @@ def _make_ai(*, rephrase: dict, match: dict) -> MagicMock:
 
 
 PROJECTS = [
-    {"name": "Ondo", "url": "https://app.ondoperps.xyz/?ref=44CXB4",
+    {"name": "Atlas", "url": "https://atlas.example/product",
      "description": "", "tags": []},
-    {"name": "AI", "url": "https://truenorth.xyz/ref/XS5PK5",
+    {"name": "Beacon", "url": "https://beacon.example/start",
      "description": "", "tags": []},
-    {"name": "Hyperliquid", "url": "https://app.hyperliquid.xyz/join/AEROGR",
+    {"name": "Comet", "url": "https://comet.example/join",
      "description": "", "tags": []},
 ]
 
@@ -54,7 +54,7 @@ class TestUnderstandStep:
     def test_extracts_url_from_source(self):
         ai = _make_ai(
             rephrase={"main": "x", "topic": "t", "reasoning": "r"},
-            match={"project_name": "Ondo", "cta_text": "Try → https://app.ondoperps.xyz/?ref=44CXB4", "reasoning": "y"},
+            match={"project_name": "Atlas", "cta_text": "Try → https://atlas.example/product", "reasoning": "y"},
         )
         wf = DraftWorkflow(ai)
         result = wf.run(
@@ -68,7 +68,7 @@ class TestUnderstandStep:
     def test_no_url_returns_none(self):
         ai = _make_ai(
             rephrase={"main": "x", "topic": "t", "reasoning": "r"},
-            match={"project_name": "Ondo", "cta_text": "Try → https://app.ondoperps.xyz/?ref=44CXB4", "reasoning": "y"},
+            match={"project_name": "Atlas", "cta_text": "Try → https://atlas.example/product", "reasoning": "y"},
         )
         wf = DraftWorkflow(ai)
         result = wf.run(
@@ -93,8 +93,8 @@ class TestRephraseStep:
                 "reasoning": "kept it punchy",
             },
             {
-                "project_name": "Hyperliquid",
-                "cta_text": "Try → https://app.hyperliquid.xyz/join/AEROGR",
+                "project_name": "Comet",
+                "cta_text": "Try → https://comet.example/join",
                 "reasoning": "matches topic",
             },
         ]
@@ -118,8 +118,8 @@ class TestRephraseStep:
                 "reasoning": "energetic tone",
             },
             match={
-                "project_name": "Hyperliquid",
-                "cta_text": "Try → https://app.hyperliquid.xyz/join/AEROGR",
+                "project_name": "Comet",
+                "cta_text": "Try → https://comet.example/join",
                 "reasoning": "matches",
             },
         )
@@ -143,8 +143,8 @@ class TestRephraseStep:
                 "reasoning": "y",
             },
             match={
-                "project_name": "Ondo",
-                "cta_text": "Try → https://app.ondoperps.xyz/?ref=44CXB4",
+                "project_name": "Atlas",
+                "cta_text": "Try → https://atlas.example/product",
                 "reasoning": "y",
             },
         )
@@ -157,6 +157,21 @@ class TestRephraseStep:
         )
         assert "https://leaked.com" not in result.draft.body
 
+    def test_original_take_uses_distinct_prompt_and_persists_mode(self):
+        ai = _make_ai(
+            rephrase={"main": "A new angle.", "topic": "markets", "reasoning": "new"},
+            match={"project_name": "Atlas", "cta_text": "Try → https://atlas.example/product", "reasoning": "fit"},
+        )
+        result = DraftWorkflow(ai).run(
+            source_text="Markets are moving", source_author="x",
+            source_tweet_id="t-1", projects=PROJECTS,
+            writing_mode="original_take",
+        )
+        first_system = ai.generate_draft.call_args_list[0].kwargs["system"]
+        assert "ORIGINAL-TAKE WRITER" in first_system
+        assert result.draft.writing_mode == "original_take"
+        assert result.writing_mode == "original_take"
+
 
 class TestMatchStep:
     """Step 3 — the second LLM call."""
@@ -167,8 +182,8 @@ class TestMatchStep:
         ai.generate_draft.side_effect = [
             {"main": "x", "topic": "t", "reasoning": "r"},
             {
-                "project_name": "Hyperliquid",
-                "cta_text": "Try → https://app.hyperliquid.xyz/join/AEROGR",
+                "project_name": "Comet",
+                "cta_text": "Try → https://comet.example/join",
                 "reasoning": "matches",
             },
         ]
@@ -191,8 +206,8 @@ class TestMatchStep:
         ai.generate_draft.side_effect = [
             {"main": "x", "topic": "t", "reasoning": "r"},
             {
-                "project_name": "Ondo",
-                "cta_text": "Try → https://app.ondoperps.xyz/?ref=44CXB4",
+                "project_name": "Atlas",
+                "cta_text": "Try → https://atlas.example/product",
                 "reasoning": "y",
             },
         ]
@@ -212,8 +227,8 @@ class TestMatchStep:
         ai = _make_ai(
             rephrase={"main": "x", "topic": "t", "reasoning": "r"},
             match={
-                "project_name": "Hyperliquid",
-                "cta_text": "Try → https://app.hyperliquid.xyz/join/AEROGR",
+                "project_name": "Comet",
+                "cta_text": "Try → https://comet.example/join",
                 "reasoning": "y",
             },
         )
@@ -224,8 +239,8 @@ class TestMatchStep:
             source_tweet_id="t-1",
             projects=PROJECTS,
         )
-        assert result.project_name == "Hyperliquid"
-        assert result.project_url == "https://app.hyperliquid.xyz/join/AEROGR"
+        assert result.project_name == "Comet"
+        assert result.project_url == "https://comet.example/join"
 
 
 class TestFillStep:
@@ -248,7 +263,7 @@ class TestFillStep:
             projects=PROJECTS,
         )
         # Falls back to the first project in the list.
-        assert result.project_name == "Ondo"
+        assert result.project_name == "Atlas"
         assert result.fallback_used is True
 
     def test_falls_back_when_ai_returns_no_project_name(self):
@@ -267,7 +282,7 @@ class TestFillStep:
             source_tweet_id="t-1",
             projects=PROJECTS,
         )
-        assert result.project_name == "Ondo"
+        assert result.project_name == "Atlas"
         assert result.fallback_used is True
 
     def test_case_insensitive_project_match(self):
@@ -275,8 +290,8 @@ class TestFillStep:
         ai = _make_ai(
             rephrase={"main": "x", "topic": "t", "reasoning": "r"},
             match={
-                "project_name": "hyperliquid",  # lowercase
-                "cta_text": "Try → https://app.hyperliquid.xyz/join/AEROGR",
+                "project_name": "comet",  # lowercase
+                "cta_text": "Try → https://comet.example/join",
                 "reasoning": "y",
             },
         )
@@ -287,7 +302,7 @@ class TestFillStep:
             source_tweet_id="t-1",
             projects=PROJECTS,
         )
-        assert result.project_name == "Hyperliquid"
+        assert result.project_name == "Comet"
         assert result.fallback_used is False
 
     def test_injects_url_when_cta_missing_it(self):
@@ -297,7 +312,7 @@ class TestFillStep:
         ai = _make_ai(
             rephrase={"main": "x", "topic": "t", "reasoning": "r"},
             match={
-                "project_name": "Ondo",
+                "project_name": "Atlas",
                 "cta_text": "Worth a look",  # URL missing
                 "reasoning": "y",
             },
@@ -309,16 +324,16 @@ class TestFillStep:
             source_tweet_id="t-1",
             projects=PROJECTS,
         )
-        assert "https://app.ondoperps.xyz/?ref=44CXB4" in result.cta_text
+        assert "https://atlas.example/product" in result.cta_text
         assert result.draft.link_url is not None
-        assert "https://app.ondoperps.xyz/?ref=44CXB4" in result.draft.link_url
+        assert "https://atlas.example/product" in result.draft.link_url
 
     def test_does_not_double_inject_url_when_present(self):
         ai = _make_ai(
             rephrase={"main": "x", "topic": "t", "reasoning": "r"},
             match={
-                "project_name": "Ondo",
-                "cta_text": "Try → https://app.ondoperps.xyz/?ref=44CXB4",
+                "project_name": "Atlas",
+                "cta_text": "Try → https://atlas.example/product",
                 "reasoning": "y",
             },
         )
@@ -330,7 +345,7 @@ class TestFillStep:
             projects=PROJECTS,
         )
         # The URL appears exactly once in the CTA.
-        assert result.cta_text.count("https://app.ondoperps.xyz/?ref=44CXB4") == 1
+        assert result.cta_text.count("https://atlas.example/product") == 1
 
     def test_no_projects_leaves_cta_empty(self):
         """If the CSV is empty, the match step is skipped; the
@@ -370,8 +385,8 @@ class TestTwoCallOrder:
             if "PROJECT MATCHMAKER" in system:
                 call_order.append("match")
                 return {
-                    "project_name": "Ondo",
-                    "cta_text": "Try → https://app.ondoperps.xyz/?ref=44CXB4",
+                    "project_name": "Atlas",
+                    "cta_text": "Try → https://atlas.example/product",
                     "reasoning": "y",
                 }
             call_order.append("rephrase")
@@ -395,8 +410,8 @@ class TestDraftPersistenceShape:
         ai = _make_ai(
             rephrase={"main": "Main body", "topic": "t", "reasoning": "r"},
             match={
-                "project_name": "Ondo",
-                "cta_text": "Try → https://app.ondoperps.xyz/?ref=44CXB4",
+                "project_name": "Atlas",
+                "cta_text": "Try → https://atlas.example/product",
                 "reasoning": "y",
             },
         )
@@ -411,7 +426,7 @@ class TestDraftPersistenceShape:
         assert d.source_tweet_id == "tweet-42"
         assert d.body == "Main body"
         assert d.link_url is not None
-        assert "ondoperps" in d.link_url
+        assert "atlas.example" in d.link_url
         assert d.status == "draft"  # ready to persist as a draft row
         assert d.tone == ""
 
@@ -419,8 +434,8 @@ class TestDraftPersistenceShape:
         ai = _make_ai(
             rephrase={"main": "x", "topic": "t", "reasoning": "r"},
             match={
-                "project_name": "Ondo",
-                "cta_text": "Try → https://app.ondoperps.xyz/?ref=44CXB4",
+                "project_name": "Atlas",
+                "cta_text": "Try → https://atlas.example/product",
                 "reasoning": "y",
             },
         )

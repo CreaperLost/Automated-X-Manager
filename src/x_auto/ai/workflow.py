@@ -41,12 +41,13 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from ..store.models import Draft
+from ..store.models import Draft, WritingMode
 from ..utils.text import extract_first_url
 from .client import AIClient
 from .prompts import (
     DRAFT_SYSTEM,
     MATCH_SYSTEM,
+    ORIGINAL_TAKE_SYSTEM,
     build_match_user,
     build_rephrase_user,
 )
@@ -69,7 +70,7 @@ class WorkflowResult:
     """What ``DraftWorkflow.run`` returns.
 
     ``draft`` is ready to persist (status="draft"). The other fields
-    are surfaced to the UI for transparency ("the AI picked Ondo
+    are surfaced to the UI for transparency ("the AI picked Atlas
     because the source was about DeFi perps") and for the post-fill
     validation messages.
     """
@@ -83,6 +84,7 @@ class WorkflowResult:
     rephrase_reasoning: str
     match_reasoning: str
     fallback_used: bool = False  # True if the AI's pick was invalid and we fell back
+    writing_mode: WritingMode = "rephrase"
 
 
 @dataclass
@@ -92,6 +94,7 @@ class _WorkflowState:
     source_text: str
     source_author: str
     source_tweet_id: str | None
+    writing_mode: WritingMode
     projects: list[dict[str, Any]]
     extra_instructions: str = ""
     image_paths: list[str] = field(default_factory=list)
@@ -121,6 +124,7 @@ class DraftWorkflow:
         source_author: str,
         source_tweet_id: str | None,
         projects: list[dict[str, Any]],
+        writing_mode: WritingMode = "rephrase",
         extra_instructions: str = "",
         image_paths: list[str] | None = None,
     ) -> WorkflowResult:
@@ -128,6 +132,7 @@ class DraftWorkflow:
             source_text=source_text,
             source_author=source_author,
             source_tweet_id=source_tweet_id,
+            writing_mode=writing_mode,
             projects=list(projects),
             extra_instructions=extra_instructions,
             image_paths=list(image_paths or []),
@@ -163,7 +168,11 @@ class DraftWorkflow:
             num_images=len(state.image_paths),
         )
         result = self.ai.generate_draft(
-            system=DRAFT_SYSTEM,
+            system=(
+                ORIGINAL_TAKE_SYSTEM
+                if state.writing_mode == "original_take"
+                else DRAFT_SYSTEM
+            ),
             user=user_msg,
             required_keys=REPHRASE_KEYS,
         )
@@ -238,6 +247,8 @@ class DraftWorkflow:
         return WorkflowResult(
             draft=Draft(
                 source_tweet_id=state.source_tweet_id,
+                quote_tweet_id=None,
+                writing_mode=state.writing_mode,
                 body=state.main,
                 link_url=state.cta_text or None,
                 image_paths=state.image_paths,
@@ -252,6 +263,7 @@ class DraftWorkflow:
             rephrase_reasoning=state.rephrase_reasoning,
             match_reasoning=state.match_reasoning,
             fallback_used=state.fallback_used,
+            writing_mode=state.writing_mode,
         )
 
 

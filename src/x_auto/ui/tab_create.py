@@ -13,7 +13,7 @@ v6 changes
   widget state; only the three "app state" keys move into the
   namespace.
 * **Cost preview removed** from the editor. The user already sees
-  the cost in the Publish tab's draft card; the editor only
+  the cost in Queue's draft card; the editor only
   surfaces the ``contains_url`` guard (a 13.3× cost mistake is the
   one thing worth warning about).
 * **Text-area height trimmed** 140 → 100 so the Save / Discard
@@ -31,8 +31,8 @@ Persistence model
 -----------------
 * The generated draft is persisted to the DB the moment the
   workflow finishes (status="draft").
-* The form's text inputs edit the same draft row. **Save draft**
-  updates the row, **Discard** deletes the row. The Publish tab
+* The form's text inputs edit the same draft row automatically.
+  **Discard** deletes the row. Queue
   takes over from there: drafts post or schedule with one click.
 * The namespaced session state (:class:`CreateState`) holds the id
   of the row the form is currently bound to, the last workflow
@@ -43,19 +43,20 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
+import httpx
 import streamlit as st
 
 from ..ai.client import AIClient, DraftGenerationError
 from ..ai.projects import list_projects
 from ..ai.workflow import DraftWorkflow
 from ..config import Settings
-from ..store.models import Draft
+from ..store.models import Draft, MediaUpload
 from ..store.repos import Database
-from ..utils.files import mime_from_extension
+from ..utils.files import ALLOWED_IMAGE_MIMES, mime_from_extension, validate_image
 from ..utils.text import contains_url, x_char_count
 from .tweet_card import render_tweet_preview
 
@@ -96,11 +97,14 @@ def render(
     settings: Settings,
     db: Database,
     ai: AIClient,
+    *,
+    x_client=None,
+    on_schedule=None,
 ) -> None:
     st.header("Create")
     st.caption(
-        "Pick a selected tweet, optionally attach one image, add any extra "
-        "instructions, then **Generate draft**. The AI rephrases the source "
+        "Pick a selected source, choose a writing mode and optional attachment, "
+        "then **Generate draft**. The AI writes one draft "
         "in your voice and auto-picks the best project from your CSV for "
         "the reply (a separate post). The editor shows the pick so you can "
         "override it."
@@ -110,18 +114,26 @@ def render(
     projects = list_projects(db)
 
     # Cross-tab handoff: if the user clicked "Open in Create ↗" in the
-    # Publish tab, the URL carries `?edit_draft=<id>`. Pick it up here
+    # Queue, the URL carries `?edit_draft=<id>`. Pick it up here
     # and bind the form to that draft so the editor is ready when the
     # user lands on this tab.
     edit_id = st.query_params.get("edit_draft")
     if edit_id and edit_id.lstrip("-").isdigit():
+        opened = db.get_draft(int(edit_id))
         _state().editing_draft_id = int(edit_id)
+        if opened and opened.source_tweet_id:
+            db.set_tweet_status(opened.source_tweet_id, "selected")
+            st.session_state["create_selected_source_id"] = opened.source_tweet_id
+        if opened:
+            st.session_state["create_writing_mode"] = (
+                "Original take" if opened.writing_mode == "original_take" else "Rephrase"
+            )
         st.query_params.pop("edit_draft", None)
         st.rerun()
 
     if not selected:
         st.info(
-            "No selected tweets yet. Go to **Review** and promote a few — "
+            "No selected sources yet. Open **Sources** and select one — "
             "this step needs at least one to generate from."
         )
         _render_saved_drafts(db, settings, kind="orphaned")
@@ -130,7 +142,7 @@ def render(
     if not projects:
         st.error(
             "No projects in `data/projects.csv` — add at least one in the "
-            "sidebar's **Settings** panel. Generate needs a project list to "
+            "sidebar's **Projects** section. Generate needs a project list to "
             "pick from."
         )
         _render_saved_drafts(db, settings, kind="resumable")
@@ -138,14 +150,19 @@ def render(
 
     # ---- 1. Form: source / image / extras (single column) -----------------
     st.markdown("**Source tweet**")
-    source = st.selectbox(
+    requested_id = st.session_state.pop("create_selected_source_id", None)
+    source_ids = [t.id for t in selected]
+    if requested_id in source_ids:
+        st.session_state["create_source_id"] = requested_id
+    by_id = {t.id: t for t in selected}
+    source_id = st.selectbox(
         "Source tweet",
-        selected,
+        source_ids,
         format_func=(
-            lambda t: f"@{t.account_handle}: {t.text[:80]}"
-            f"{'…' if len(t.text) > 80 else ''}"
+            lambda tid: f"@{by_id[tid].account_handle}: {by_id[tid].text[:80]}"
+            f"{'…' if len(by_id[tid].text) > 80 else ''}"
         ),
-        key="create_source",
+        key="create_source_id",
         label_visibility="collapsed",
         help=(
             f"{len(projects)} project(s) in your CSV — the AI will auto-pick "
@@ -153,16 +170,39 @@ def render(
             "read as a topic hint (it is not copied into your tweet)."
         ),
     )
+    source = by_id[source_id]
 
-    st.markdown("**Image (optional, max 1)**")
-    upload = st.file_uploader(
-        "Image",
-        type=["jpg", "jpeg", "png", "gif", "webp"],
-        accept_multiple_files=False,
-        key="create_image",
-        label_visibility="collapsed",
+    writing_label = st.radio(
+        "Writing mode",
+        ["Rephrase", "Original take"],
+        horizontal=True,
+        key="create_writing_mode",
+        help="Rephrase preserves the core idea. Original take develops a new angle.",
     )
-    _render_image_library(db, settings)
+    writing_mode = "original_take" if writing_label == "Original take" else "rephrase"
+
+    attachment_options = ["None"]
+    if source.source_image_url:
+        attachment_options.append("Use source image")
+    attachment_options.append("Upload/use my image")
+    attachment = st.radio(
+        "Attachment",
+        attachment_options,
+        horizontal=True,
+        key=f"create_attachment_{source.id}",
+    )
+    upload = None
+    if attachment == "Use source image" and source.source_image_url:
+        st.image(source.source_image_url, width=320)
+    elif attachment == "Upload/use my image":
+        upload = st.file_uploader(
+            "Image",
+            type=["jpg", "jpeg", "png", "gif", "webp"],
+            accept_multiple_files=False,
+            key="create_image",
+            label_visibility="collapsed",
+        )
+        _render_image_library(db, settings)
 
     st.markdown("**Extra instructions (optional)**")
     extra = st.text_area(
@@ -173,14 +213,19 @@ def render(
         placeholder="e.g. mention my open-source project, target devs",
     )
 
+    generate_label = "Regenerate draft" if _state().editing_draft_id else "Generate draft"
     if st.button(
-        "Generate draft",
+        generate_label,
         type="primary",
         key="create_generate",
         use_container_width=True,
         help="Two LLM calls: rephrase the source, then pick a project + write the CTA.",
     ):
-        _on_generate(settings, db, ai, source, projects, upload, extra or "")
+        _on_generate(
+            settings, db, ai, source, projects, upload, extra or "",
+            attachment=attachment,
+            writing_mode=writing_mode,
+        )
 
     # ---- 2. Editor + live preview (bound to a draft row in the DB) ------
     editing_id = _state().editing_draft_id
@@ -190,7 +235,10 @@ def render(
         return
 
     last_result = _state().last_workflow
-    _render_editor_with_preview(settings, db, draft, last_workflow=last_result)
+    _render_editor_with_preview(
+        settings, db, draft, last_workflow=last_result,
+        x_client=x_client, on_schedule=on_schedule,
+    )
 
     # ---- 3. Saved drafts list (Load / Discard) --------------------------
     _render_saved_drafts(
@@ -206,6 +254,9 @@ def _on_generate(
     projects: list[dict],
     upload,
     extra: str,
+    *,
+    attachment: str = "None",
+    writing_mode: str = "rephrase",
 ) -> None:
     if not ai.configured:
         st.error(
@@ -214,18 +265,24 @@ def _on_generate(
         )
         return
 
-    # Image: library pick > fresh upload > none.
+    # Resolve and validate the selected attachment before spending an AI call.
     state = _state()
-    picked_path = state.picked_image_path
-    if picked_path and Path(picked_path).exists():
-        image_paths = [picked_path]
-    elif upload is not None:
-        image_paths = _save_upload(upload, settings.data_dir / "media_cache")
-        if not image_paths:
-            st.error("Failed to save the upload.")
+    image_paths: list[str] = []
+    if attachment == "Use source image":
+        try:
+            image_paths = [_cache_source_image(settings, db, source)]
+        except ValueError as exc:
+            st.error(f"Couldn't use the source image: {exc}")
             return
-    else:
-        image_paths = []
+    elif attachment == "Upload/use my image":
+        picked_path = state.picked_image_path
+        if picked_path and Path(picked_path).exists():
+            image_paths = [picked_path]
+        elif upload is not None:
+            image_paths = _save_upload(upload, settings.data_dir / "media_cache")
+            if not image_paths:
+                st.error("Failed to save the upload.")
+                return
     if image_paths:
         st.caption(f"Image attached: `{Path(image_paths[0]).name}`")
 
@@ -238,6 +295,7 @@ def _on_generate(
                 source_text=source.text,
                 source_author=source.account_handle,
                 source_tweet_id=source.id,
+                writing_mode=writing_mode,
                 projects=projects,
                 extra_instructions=extra,
                 image_paths=image_paths,
@@ -272,6 +330,8 @@ def _render_editor_with_preview(
     draft: Draft,
     *,
     last_workflow=None,
+    x_client=None,
+    on_schedule=None,
 ) -> None:
     """Edit the draft and see a live preview.
 
@@ -280,8 +340,8 @@ def _render_editor_with_preview(
       2. **Live preview card** — reflects current edits, always visible
       3. Main + reply text inputs
       4. Character + URL warnings (no cost preview — that lives on
-         the Publish tab's draft card, where the user actually pays)
-      5. Save / Discard buttons
+         Queue's draft card, where the user actually pays)
+      5. Auto-save status / Discard button
 
     The preview is rendered BEFORE the editor so the user sees it
     immediately on any viewport. We read the current widget values
@@ -302,7 +362,6 @@ def _render_editor_with_preview(
                 f"Rephrasing **@{src.account_handle}**: "
                 f"{src.text[:120]}{'…' if len(src.text) > 120 else ''}"
             )
-
     # Auto-selected project chip (transparency). Shown only when we
     # have a workflow result for this draft. The user can still
     # override the reply field by typing a different URL/CTA.
@@ -352,8 +411,8 @@ def _render_editor_with_preview(
     if not (reply_text or "").strip():
         st.warning(
             "Reply is empty — the AI's auto-pick didn't match any project. "
-            "Add a project to `data/projects.csv` in the sidebar's "
-            "**Settings** panel, or paste a URL here manually. The reply "
+            "Add a project in the sidebar's **Projects** section, or paste "
+            "a URL here manually. The reply "
             "carries your project link in a separate post (saves $0.170 vs "
             "an inline URL)."
         )
@@ -370,29 +429,65 @@ def _render_editor_with_preview(
             "Move the URL to the reply field below."
         )
 
-    # Cost preview was removed in v3 — the user sees the cost on the
-    # Publish tab's draft card (where the action is taken). The
-    # contains_url guard above is the one cost mistake worth
-    # preventing in the editor (13.3× vs inline URL).
+    # Persist edits as soon as Streamlit has received them. This makes
+    # adding instructions or adjusting the generated copy safe across
+    # tab switches and browser refreshes; the user no longer needs to
+    # find and click a separate Save button.
+    normalized_reply = (reply_text or "").strip() or None
+    if main_text.strip() != draft.body or normalized_reply != draft.link_url:
+        draft.body = main_text.strip()
+        draft.link_url = normalized_reply
+        db.update_draft(draft)
+        st.caption("✓ Changes saved automatically")
+    else:
+        st.caption("Changes save automatically as you edit.")
 
-    col_save, col_discard = st.columns(2)
-    with col_save:
-        if st.button(
-            "Save draft",
-            key=f"create_save_draft_{draft.id}",
-            type="primary",
-            use_container_width=True,
-        ):
-            _update_draft_body(db, draft, main_text, reply_text)
-            st.success(
-                f"Draft #{draft.id} saved. Open **Publish** to post it."
+    if x_client is not None:
+        st.markdown("**Publish**")
+        post_col, schedule_col = st.columns(2)
+        with post_col:
+            if st.button(
+                "Post now", key=f"create_post_{draft.id}",
+                type="primary", use_container_width=True,
+            ):
+                # Reuse Queue's deterministic preflight and result banner.
+                from .tab_publish import _post_now
+
+                latest = db.get_draft(draft.id) or draft
+                _post_now(settings, db, x_client, latest)
+                st.session_state["requested_view"] = "Queue"
+                st.rerun()
+        with schedule_col:
+            default_fire = _tomorrow_rounded()
+            fire_at = st.datetime_input(
+                "Schedule for",
+                value=default_fire,
+                min_value=datetime.now() + timedelta(
+                    minutes=settings.schedule.min_lead_minutes
+                ),
+                max_value=datetime.now() + timedelta(
+                    days=settings.schedule.max_lookahead_days
+                ),
+                key=f"create_schedule_at_{draft.id}",
             )
-    with col_discard:
-        if st.button("Discard", key=f"create_discard_{draft.id}", use_container_width=True):
-            db.delete_draft(draft.id)
-            _state().editing_draft_id = None
-            st.warning(f"Draft #{draft.id} deleted.")
-            st.rerun()
+            if st.button(
+                "Schedule", key=f"create_schedule_{draft.id}",
+                use_container_width=True, disabled=on_schedule is None,
+            ):
+                schedule_id = on_schedule(draft.id, fire_at)
+                st.success(f"Scheduled for {fire_at} (#{schedule_id}).")
+                st.session_state["requested_view"] = "Queue"
+                st.rerun()
+
+    if st.button(
+        "Discard",
+        key=f"create_discard_{draft.id}",
+        use_container_width=True,
+    ):
+        db.delete_draft(draft.id)
+        _state().editing_draft_id = None
+        st.warning(f"Draft #{draft.id} deleted.")
+        st.rerun()
 
 
 def _update_draft_body(
@@ -412,6 +507,50 @@ def _save_upload(upload, cache_dir: Path) -> list[str]:
     dest = cache_dir / f"{uuid.uuid4().hex}{ext}"
     dest.write_bytes(upload.getbuffer())
     return [str(dest)]
+
+
+def _cache_source_image(settings: Settings, db: Database, source) -> str:
+    """Download the fetched source's first photo into the normal media cache."""
+    if not source.source_image_url:
+        raise ValueError("this source has no reusable photo")
+    try:
+        response = httpx.get(source.source_image_url, timeout=20.0, follow_redirects=True)
+        response.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise ValueError(f"download failed ({exc})") from exc
+    mime = response.headers.get("content-type", "").split(";", 1)[0].lower()
+    if mime not in ALLOWED_IMAGE_MIMES:
+        raise ValueError(f"unsupported image type {mime or 'unknown'}")
+    ext = {
+        "image/jpeg": ".jpg", "image/png": ".png",
+        "image/gif": ".gif", "image/webp": ".webp",
+    }[mime]
+    cache_dir = settings.data_dir / "media_cache"
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    dest = cache_dir / f"source-{source.id}-{uuid.uuid4().hex[:8]}{ext}"
+    dest.write_bytes(response.content)
+    validation = validate_image(dest)
+    if not validation.ok:
+        try:
+            dest.unlink()
+        except OSError:
+            pass
+        raise ValueError(validation.reason)
+    db.register_media_upload(MediaUpload(
+        local_path=str(dest), filename=dest.name, mime=mime,
+        size=validation.size,
+    ))
+    return str(dest)
+
+
+def _tomorrow_rounded(now: datetime | None = None) -> datetime:
+    """Tomorrow at the current local time, rounded up to 15 minutes."""
+    base = (now or datetime.now()) + timedelta(days=1)
+    rounded_minute = ((base.minute + 14) // 15) * 15
+    if rounded_minute == 60:
+        base = base + timedelta(hours=1)
+        rounded_minute = 0
+    return base.replace(minute=rounded_minute, second=0, microsecond=0)
 
 
 def _render_image_library(db: Database, settings: Settings) -> None:

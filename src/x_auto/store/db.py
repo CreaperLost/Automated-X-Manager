@@ -27,6 +27,10 @@ SCHEMA: list[str] = [
         text             TEXT NOT NULL,
         created_at       TIMESTAMP NOT NULL,
         public_metrics   TEXT,
+        quote_tweet_id   TEXT,
+        quote_tweet_text TEXT,
+        quote_tweet_author_id TEXT,
+        source_image_url TEXT,
         fetched_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         status           TEXT NOT NULL DEFAULT 'new'
     )
@@ -46,6 +50,8 @@ SCHEMA: list[str] = [
         source_tweet_id  TEXT REFERENCES tweets(id),
         body             TEXT NOT NULL,
         link_url         TEXT,
+        quote_tweet_id   TEXT,
+        writing_mode     TEXT NOT NULL DEFAULT 'rephrase',
         image_paths      TEXT,
         tone             TEXT,
         status           TEXT NOT NULL DEFAULT 'draft',
@@ -126,3 +132,28 @@ def apply_schema(conn: sqlite3.Connection) -> None:
     """Apply the full schema. Idempotent."""
     for stmt in SCHEMA:
         conn.execute(stmt)
+
+    # Additive migrations for databases created before quote-post support.
+    # SQLite has no IF NOT EXISTS form for ALTER TABLE, so inspect each
+    # table before adding the new nullable columns.
+    migrations = {
+        "tweets": {
+            "quote_tweet_id": "TEXT",
+            "quote_tweet_text": "TEXT",
+            "quote_tweet_author_id": "TEXT",
+            "source_image_url": "TEXT",
+        },
+        "drafts": {
+            "quote_tweet_id": "TEXT",
+            "writing_mode": "TEXT NOT NULL DEFAULT 'rephrase'",
+        },
+    }
+    for table, columns in migrations.items():
+        existing = {
+            row[1] for row in conn.execute(f"PRAGMA table_info({table})")
+        }
+        for column, definition in columns.items():
+            if column not in existing:
+                conn.execute(
+                    f"ALTER TABLE {table} ADD COLUMN {column} {definition}"
+                )

@@ -33,6 +33,7 @@ from ..utils.text import contains_url, validate_post_body
 from ..x.client import AuthExpiredError, RateLimitedError, XApiError, XClient
 from ..x.costs import estimate_post_cost
 from ..x.publish import publish_draft_sync
+from .tab_create import _tomorrow_rounded
 from .tweet_card import render_tweet_preview
 
 # Session-state keys (kept short and tab-prefixed).
@@ -52,8 +53,10 @@ def render(
     ai: AIClient,
     *,
     on_schedule,
+    on_reschedule=None,
+    on_cancel_schedule=None,
 ) -> None:
-    st.header("Publish")
+    st.header("Queue")
     # No global caption — each section has its own one-liner below.
 
     # Persistent post-result banner. ``st.success`` / ``st.error`` are
@@ -79,7 +82,7 @@ def render(
     )
     pending = _list_pending(db, limit=60)
     if not pending:
-        st.caption("No drafts in the queue. Generate one in the **Create** tab.")
+        st.caption("No drafts in the queue. Generate one in **Create**.")
     else:
         _render_drafts_grid(
             settings, db, x_client, pending, on_schedule
@@ -100,9 +103,37 @@ def render(
                 if draft and len(draft.body) > 60
                 else (draft.body if draft else "?")
             )
-            st.markdown(
-                f"- **{_fmt_dt(s.fire_at)}** — draft #{s.draft_id} `{label}`"
-            )
+            with st.container(border=True):
+                st.markdown(
+                    f"**{_fmt_dt(s.fire_at)}** — draft #{s.draft_id} `{label}`"
+                )
+                edit_col, cancel_col = st.columns(2)
+                with edit_col:
+                    revised = st.datetime_input(
+                        "New time", value=_tomorrow_rounded(),
+                        min_value=datetime.now() + timedelta(
+                            minutes=settings.schedule.min_lead_minutes
+                        ),
+                        max_value=datetime.now() + timedelta(
+                            days=settings.schedule.max_lookahead_days
+                        ),
+                        key=f"queue_reschedule_at_{s.id}",
+                    )
+                    if st.button(
+                        "Reschedule", key=f"queue_reschedule_{s.id}",
+                        use_container_width=True, disabled=on_reschedule is None,
+                    ):
+                        on_reschedule(s.id, s.draft_id, revised)
+                        st.rerun()
+                with cancel_col:
+                    st.caption("Return this post to Drafts without publishing it.")
+                    if st.button(
+                        "Cancel schedule", key=f"queue_cancel_schedule_{s.id}",
+                        use_container_width=True,
+                        disabled=on_cancel_schedule is None,
+                    ):
+                        on_cancel_schedule(s.id, s.draft_id)
+                        st.rerun()
 
     # ---- 3. Published (repost / paraphrase) --------------------------------
     st.markdown("---")
@@ -225,7 +256,7 @@ def _render_draft_card_compact(
         # Popover for everything else: schedule, open in create, discard.
         with st.popover("⋯", use_container_width=True, help="More actions"):
             st.caption("**Schedule for later**")
-            default_fire = datetime.now() + timedelta(hours=1)
+            default_fire = _tomorrow_rounded()
             min_fire = datetime.now() + timedelta(
                 minutes=settings.schedule.min_lead_minutes
             )
@@ -257,6 +288,7 @@ def _render_draft_card_compact(
                 use_container_width=True,
             ):
                 st.query_params["edit_draft"] = str(draft.id)
+                st.session_state["requested_view"] = "Create"
                 st.rerun()
 
             if st.button(
@@ -288,7 +320,7 @@ def _post_now(
     ``st.error`` directly, because the caller does ``st.rerun()``
     right after to refresh the Drafts/Published split and a rerun
     wipes any inline message. The persistent banner at the top of
-    the Publish tab reads from session state and shows the result
+    Queue reads from session state and shows the result
     until the user dismisses it.
     """
     # ---- Pre-flight: catch X's strictest rules before paying ----
@@ -296,7 +328,9 @@ def _post_now(
     for err in validate_post_body(draft.body, role="main"):
         preflight.append(f"**Main tweet** — {err.message}  \n_Hint: {err.hint}_")
     if draft.link_url:
-        for err in validate_post_body(draft.link_url, role="reply"):
+        for err in validate_post_body(
+            draft.link_url, role="reply", allow_url=True
+        ):
             preflight.append(f"**Reply tweet** — {err.message}  \n_Hint: {err.hint}_")
     if preflight:
         db.log_post(
@@ -412,6 +446,7 @@ def _render_published_card_compact(
         st.markdown(head)
 
         # Source handle (small, never wraps awkwardly).
+        source = None
         if original.source_tweet_id:
             source = db.get_tweet(original.source_tweet_id)
             if source:
@@ -509,6 +544,7 @@ def _do_repost(
         source_tweet_id=original.source_tweet_id,
         body=original.body,
         link_url=original.link_url,
+        quote_tweet_id=None,
         image_paths=list(original.image_paths),
         tone=original.tone,
         status="draft",  # _publish_draft will flip to 'posted'
@@ -673,6 +709,7 @@ def _post_paraphrased(
         source_tweet_id=original.source_tweet_id,
         body=new_body.strip(),
         link_url=new_reply.strip() or None,
+        quote_tweet_id=None,
         image_paths=list(original.image_paths),
         tone="",
         status="draft",

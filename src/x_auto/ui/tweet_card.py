@@ -1,7 +1,7 @@
 """Visual preview of a tweet (+ optional reply), styled like the X timeline.
 
 This is a presentation-only helper. It is used in the Create tab (live,
-reflects the current edits) and the Publish tab (final drafts, drafts,
+reflects the current edits) and Queue (final drafts, drafts,
 paraphrase preview, posted history). The function is pure presentation
 — it does not write to the DB or call the X API.
 
@@ -206,6 +206,7 @@ def _render_one_compact(
                     st.caption(f"🖼  (image missing: {Path(p).name})")
             except (OSError, ValueError):
                 st.caption(f"🖼  (image unreadable: {Path(p).name})")
+
 
 
 # --- Shared building blocks -------------------------------------------------

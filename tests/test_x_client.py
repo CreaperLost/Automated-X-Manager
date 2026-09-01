@@ -101,6 +101,25 @@ def test_get_user_tweets_dedupes_cost_per_tweet(x_client: XClient):
     assert s["reads_cost_usd"] == 2 * 0.005
 
 
+def test_get_user_tweets_extracts_first_photo_only(x_client: XClient):
+    payload = {
+        "data": [{
+            "id": "10", "text": "with media", "author_id": "123",
+            "created_at": "2026-01-01T00:00:00.000Z", "public_metrics": {},
+            "attachments": {"media_keys": ["video-1", "photo-1", "photo-2"]},
+        }],
+        "includes": {"media": [
+            {"media_key": "video-1", "type": "video", "preview_image_url": "https://x/video.jpg"},
+            {"media_key": "photo-1", "type": "photo", "url": "https://x/first.jpg"},
+            {"media_key": "photo-2", "type": "photo", "url": "https://x/second.jpg"},
+        ]},
+    }
+    with respx.mock(base_url=API_BASE, assert_all_called=False) as mock:
+        mock.get("/users/123/tweets").mock(return_value=httpx.Response(200, json=payload))
+        tweets = asyncio.run(x_client.get_user_tweets("123", max_results=5))
+    assert tweets[0].source_image_url == "https://x/first.jpg"
+
+
 def test_rate_limit_raises_after_one_retry(x_client: XClient):
     with respx.mock(base_url=API_BASE, assert_all_called=False) as mock:
         mock.get("/users/by/username/naval").mock(

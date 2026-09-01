@@ -40,6 +40,39 @@ def test_upsert_tweets_dedup(db: Database):
     assert len(db.list_tweets()) == 2
 
 
+def test_quote_metadata_roundtrip(db: Database):
+    db.upsert_account("naval", "1")
+    db.upsert_tweets("naval", [{
+        "id": "quoted-source",
+        "text": "My commentary",
+        "created_at": "2026-01-01T00:00:00Z",
+        "public_metrics": {},
+        "quote_tweet_id": "quoted-original",
+        "quote_tweet_text": "The original post",
+        "quote_tweet_author_id": "2",
+        "source_image_url": "https://pbs.twimg.com/media/example.jpg",
+    }])
+    tweet = db.get_tweet("quoted-source")
+    assert tweet is not None
+    assert tweet.quote_tweet_id == "quoted-original"
+    assert tweet.quote_tweet_text == "The original post"
+    assert tweet.source_image_url == "https://pbs.twimg.com/media/example.jpg"
+
+    from x_auto.store.models import Draft
+    draft_id = db.create_draft(Draft(
+        body="my take", quote_tweet_id="quoted-original", status="draft"
+    ))
+    draft = db.get_draft(draft_id)
+    assert draft is not None
+    assert draft.quote_tweet_id == "quoted-original"
+    assert draft.writing_mode == "rephrase"
+
+    original_id = db.create_draft(Draft(
+        body="new angle", writing_mode="original_take", status="draft"
+    ))
+    assert db.get_draft(original_id).writing_mode == "original_take"
+
+
 def test_set_tweet_statuses(db: Database):
     db.upsert_account("naval", "1")
     db.upsert_tweets("naval", [

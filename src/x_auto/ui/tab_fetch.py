@@ -18,7 +18,10 @@ def render(
     st.header("Fetch")
     st.caption(
         "Pull recent tweets from the accounts in `config/accounts.yaml`. "
-        "Each refresh costs $0.010 per handle (user lookup) + $0.005 per new tweet."
+        f"Fetches up to {settings.x.recent_max_results} posts per handle. "
+        "Estimated maximum: "
+        f"${0.010 + settings.x.recent_max_results * 0.005:0.3f} per handle "
+        "($0.010 lookup + $0.005 per post)."
     )
 
     pool = settings.accounts
@@ -73,6 +76,7 @@ async def _fetch_all(
                     "text": t.text,
                     "created_at": t.created_at,
                     "public_metrics": t.public_metrics,
+                    "source_image_url": t.source_image_url,
                 }
                 for t in tweets
             ]

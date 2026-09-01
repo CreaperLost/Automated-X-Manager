@@ -79,6 +79,7 @@ class Tweet:
     author_id: UserId
     created_at: str  # ISO 8601
     public_metrics: dict[str, int]
+    source_image_url: str | None = None
 
 
 @dataclass
@@ -242,15 +243,28 @@ class XClient:
         """GET /2/users/:id/tweets ($0.005 * N)."""
         params: dict[str, Any] = {
             "max_results": max(5, min(100, max_results)),
-            "tweet.fields": "created_at,public_metrics,author_id",
+            "tweet.fields": "created_at,public_metrics,author_id,attachments",
+            "expansions": "attachments.media_keys",
+            "media.fields": "media_key,type,url,preview_image_url",
         }
         if exclude:
             params["exclude"] = ",".join(exclude)
         body, _ = await self._request(
             "GET", f"/users/{user_id}/tweets", auth="bearer", params=params
         )
+        included_media = {
+            str(m.get("media_key")): m
+            for m in (body.get("includes", {}).get("media", []) or [])
+            if m.get("media_key")
+        }
         tweets: list[Tweet] = []
         for t in body.get("data", []) or []:
+            source_image_url = None
+            for media_key in (t.get("attachments", {}).get("media_keys", []) or []):
+                media = included_media.get(str(media_key))
+                if media and media.get("type") == "photo" and media.get("url"):
+                    source_image_url = str(media["url"])
+                    break
             tweets.append(
                 Tweet(
                     id=str(t["id"]),
@@ -258,6 +272,7 @@ class XClient:
                     author_id=str(t.get("author_id", user_id)),
                     created_at=str(t.get("created_at", "")),
                     public_metrics=dict(t.get("public_metrics", {})),
+                    source_image_url=source_image_url,
                 )
             )
         self._meter.add_read_post(len(tweets))

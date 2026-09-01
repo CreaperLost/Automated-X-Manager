@@ -71,8 +71,7 @@ X API constraints (verified Aug 2026) — your awareness, not your job:
 - Posts are limited to 280 characters by default.
 - Bearer tokens cannot write; user-context OAuth is required.
 
-For a deeper reference (endpoints, rate limits, common gotchas), the
-agent's tool list includes data/x_skill.md.
+Use only the provided source text and deterministic X validation rules.
 
 Return a single JSON object with this exact shape — no extra keys, no
 markdown fences:
@@ -85,10 +84,32 @@ markdown fences:
 """
 
 
+ORIGINAL_TAKE_SYSTEM = """You are an ORIGINAL-TAKE WRITER for X (Twitter).
+The user selected a source post as research. Write a distinct opinion, insight,
+or framing inspired by its topic; do not summarize or paraphrase the source.
+
+Hard rules:
+1. Return a MAIN post of at most 280 characters; aim for 220–260.
+2. The MAIN post must contain no URL. A separate step writes the linked reply.
+3. Add a genuinely new angle while staying grounded in the source topic. Do not
+   invent factual claims that are not supported by the source.
+4. Use one clear idea, no hashtag spam, emoji stuffing, clickbait, or all-caps.
+5. Use at most one cashtag (a ``$`` followed by 1–5 letters or digits).
+6. Match the source's general energy without copying its wording.
+
+Return one JSON object with exactly these keys and no markdown fences:
+{
+  "main": "<the original take, <=280 chars, no URL>",
+  "topic": "<one short topic phrase>",
+  "reasoning": "<one short sentence describing the new angle>"
+}
+"""
+
+
 MATCH_SYSTEM = """You are a PROJECT MATCHMAKER and CTA WRITER for X (Twitter) posts.
 
 The user has a list of their own projects (each with a name and a
-referral URL). They want to post a tweet about a source tweet and
+project URL). They want to post a tweet about a source tweet and
 have the reply (a separate post) point at the user's own project
 that is most relevant to the source's topic.
 
@@ -112,9 +133,9 @@ Rules:
 - The "cta_text" must NOT include any URL from the source tweet.
 - The "cta_text" must NOT copy the source's wording.
 - Keep the CTA short. Examples of the right shape (don't copy these):
-      "Try now → https://app.ondoperps.xyz/?ref=44CXB4"
-      "Worth a look if you're trading perps → https://entropy.io/?r=aero"
-      "20% off your first trade → https://app.perpl.xyz/trade?ref=..."
+      "Try now → https://atlas.example/product"
+      "Worth a look → https://atlas.example/product"
+      "Explore the project → https://comet.example/start"
 
 X API constraints (verified Aug 2026) — your awareness, not your job:
 - A post containing a URL costs $0.200 (13.3× a plain $0.015 post).

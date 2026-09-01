@@ -91,9 +91,8 @@ def test_unconfigured_client_raises_helpfully():
         data_dir=None,    # type: ignore[arg-type]
         config_dir=None,  # type: ignore[arg-type]
         accounts=(),
-        projects=(),
         minimax=MinimaxSettings(
-            base_url="https://api.minimaxi.com/v1",
+            base_url="https://api.minimax.io/v1",
             model_id="MiniMax-M2.7",
             temperature=0.7,
             max_tokens=400,

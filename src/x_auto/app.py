@@ -6,7 +6,7 @@ Run with:
 
 UI shape (v3 simplification):
   Sidebar  -> Model picker (auto-save) + Projects editor
-  Main     -> 4 tabs (Fetch, Review, Create, Publish) with no
+  Main     -> 3 session-backed views (Sources, Create, Queue) with no
               global session-cost line. Costs are surfaced per action.
 """
 from __future__ import annotations
@@ -31,9 +31,8 @@ from x_auto.scheduler import runner as scheduler_runner
 from x_auto.store.repos import Database
 from x_auto.ui.layout import render_sidebar
 from x_auto.ui.tab_create import render as render_create
-from x_auto.ui.tab_fetch import render as render_fetch
 from x_auto.ui.tab_publish import render as render_publish
-from x_auto.ui.tab_review import render as render_review
+from x_auto.ui.tab_sources import render as render_sources
 from x_auto.x.auth import TokenManager
 from x_auto.x.client import XClient
 
@@ -90,22 +89,45 @@ def main() -> None:
     # the script on every interaction but the CSS is idempotent).
     _inject_active_tab_css()
 
-    tabs = st.tabs(["Fetch", "Review", "Create", "Publish"])
-    with tabs[0]:
-        render_fetch(settings, db, x_client)
-    with tabs[1]:
-        render_review(db)
-    with tabs[2]:
-        render_create(settings, db, ai)
-    with tabs[3]:
+    requested_view = st.session_state.pop("requested_view", None)
+    if requested_view in ("Sources", "Create", "Queue"):
+        st.session_state["navigation_choice"] = requested_view
+    if "navigation_choice" not in st.session_state:
+        st.session_state["navigation_choice"] = "Sources"
+    view = st.segmented_control(
+        "Workspace",
+        ["Sources", "Create", "Queue"],
+        key="navigation_choice",
+        label_visibility="collapsed",
+    ) or "Sources"
+
+    def schedule(draft_id, fire_at):
+        return scheduler_runner.schedule_draft(
+            settings, db, x_client, draft_id, fire_at
+        )
+
+    def reschedule(schedule_id, draft_id, fire_at):
+        return scheduler_runner.reschedule_draft(
+            settings, db, x_client, schedule_id, draft_id, fire_at
+        )
+
+    def cancel_schedule(schedule_id, draft_id):
+        return scheduler_runner.cancel_scheduled_draft(
+            settings, db, x_client, schedule_id, draft_id
+        )
+    if view == "Sources":
+        render_sources(settings, db, x_client)
+    elif view == "Create":
+        render_create(settings, db, ai, x_client=x_client, on_schedule=schedule)
+    else:
         render_publish(
             settings,
             db,
             x_client,
             ai,
-            on_schedule=lambda draft_id, fire_at: scheduler_runner.schedule_draft(
-                settings, db, x_client, draft_id, fire_at
-            ),
+            on_schedule=schedule,
+            on_reschedule=reschedule,
+            on_cancel_schedule=cancel_schedule,
         )
 
 

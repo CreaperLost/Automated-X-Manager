@@ -38,6 +38,16 @@ def _row_to_tweet(row: sqlite3.Row) -> Tweet:
         text=row["text"],
         created_at=_parse_dt(row["created_at"]) or datetime.min,
         public_metrics=pm,
+        quote_tweet_id=row["quote_tweet_id"] if "quote_tweet_id" in row.keys() else None,
+        quote_tweet_text=row["quote_tweet_text"] if "quote_tweet_text" in row.keys() else None,
+        quote_tweet_author_id=(
+            row["quote_tweet_author_id"]
+            if "quote_tweet_author_id" in row.keys()
+            else None
+        ),
+        source_image_url=(
+            row["source_image_url"] if "source_image_url" in row.keys() else None
+        ),
         fetched_at=_parse_dt(row["fetched_at"]),
         status=row["status"],
     )
@@ -65,6 +75,14 @@ def _row_to_draft(row: sqlite3.Row) -> Draft:
         source_tweet_id=row["source_tweet_id"],
         body=row["body"],
         link_url=row["link_url"],
+        quote_tweet_id=(
+            row["quote_tweet_id"] if "quote_tweet_id" in row.keys() else None
+        ),
+        writing_mode=(
+            row["writing_mode"]
+            if "writing_mode" in row.keys() and row["writing_mode"]
+            else "rephrase"
+        ),
         image_paths=image_paths,
         tone=row["tone"] or "",
         status=row["status"],
@@ -162,8 +180,10 @@ class Database:
             cur = self._conn.execute(
                 """
                 INSERT OR IGNORE INTO tweets
-                    (id, account_handle, text, created_at, public_metrics, status)
-                VALUES (?, ?, ?, ?, ?, 'new')
+                    (id, account_handle, text, created_at, public_metrics,
+                     quote_tweet_id, quote_tweet_text, quote_tweet_author_id,
+                     source_image_url, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'new')
                 """,
                 (
                     t["id"],
@@ -171,10 +191,31 @@ class Database:
                     t["text"],
                     t["created_at"],
                     json.dumps(t.get("public_metrics", {})),
+                    t.get("quote_tweet_id"),
+                    t.get("quote_tweet_text"),
+                    t.get("quote_tweet_author_id"),
+                    t.get("source_image_url"),
                 ),
             )
             if cur.rowcount > 0:
                 new_count += 1
+            else:
+                # Refresh metadata without changing the user's review state.
+                self._conn.execute(
+                    """
+                    UPDATE tweets SET text=?, created_at=?, public_metrics=?,
+                        quote_tweet_id=?, quote_tweet_text=?,
+                        quote_tweet_author_id=?, source_image_url=?
+                    WHERE id=?
+                    """,
+                    (
+                        t["text"], t["created_at"],
+                        json.dumps(t.get("public_metrics", {})),
+                        t.get("quote_tweet_id"), t.get("quote_tweet_text"),
+                        t.get("quote_tweet_author_id"), t.get("source_image_url"),
+                        t["id"],
+                    ),
+                )
         return new_count
 
     def list_tweets(self, status: str | None = None, limit: int = 200) -> list[Tweet]:
@@ -239,13 +280,16 @@ class Database:
         cur = self._conn.execute(
             """
             INSERT INTO drafts
-                (source_tweet_id, body, link_url, image_paths, tone, status)
-            VALUES (?, ?, ?, ?, ?, ?)
+                (source_tweet_id, body, link_url, quote_tweet_id, writing_mode,
+                 image_paths, tone, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 draft.source_tweet_id,
                 draft.body,
                 draft.link_url,
+                draft.quote_tweet_id,
+                draft.writing_mode,
                 json.dumps(draft.image_paths),
                 draft.tone,
                 draft.status,
@@ -278,7 +322,8 @@ class Database:
         self._conn.execute(
             """
             UPDATE drafts SET
-                body=?, link_url=?, image_paths=?, tone=?, status=?,
+                body=?, link_url=?, quote_tweet_id=?, writing_mode=?,
+                image_paths=?, tone=?, status=?,
                 finalized_at=?, scheduled_at=?, posted_at=?,
                 x_tweet_id=?, x_reply_id=?, cost_usd=?, error=?
             WHERE id=?
@@ -286,6 +331,8 @@ class Database:
             (
                 draft.body,
                 draft.link_url,
+                draft.quote_tweet_id,
+                draft.writing_mode,
                 json.dumps(draft.image_paths),
                 draft.tone,
                 draft.status,
@@ -378,6 +425,18 @@ class Database:
             "UPDATE schedules SET attempts=attempts+1, last_error='fired late' "
             "WHERE id=?",
             (schedule_id,),
+        )
+
+    def reschedule(self, schedule_id: int, fire_at: datetime) -> None:
+        self._conn.execute(
+            "UPDATE schedules SET fire_at=?, status='pending', last_error=NULL "
+            "WHERE id=?",
+            (fire_at.isoformat(sep=" "), schedule_id),
+        )
+
+    def cancel_schedule(self, schedule_id: int) -> None:
+        self._conn.execute(
+            "UPDATE schedules SET status='cancelled' WHERE id=?", (schedule_id,)
         )
 
     # ---- media_uploads ----

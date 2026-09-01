@@ -222,6 +222,27 @@ def _bundle_from_token_response(body: dict[str, Any]) -> TokenBundle:
     )
 
 
+def _refresh_error_detail(exc: httpx.HTTPError) -> str:
+    """Return OAuth's safe error fields without exposing request credentials."""
+    if isinstance(exc, httpx.HTTPStatusError):
+        response = exc.response
+        parts: list[str] = []
+        try:
+            body = response.json()
+        except (ValueError, json.JSONDecodeError):
+            body = None
+        if isinstance(body, dict):
+            for key in ("error", "error_description", "title", "detail"):
+                value = body.get(key)
+                if value and str(value) not in parts:
+                    parts.append(str(value))
+        elif response.text.strip():
+            parts.append(response.text.strip()[:500])
+        suffix = f": {' — '.join(parts)}" if parts else ""
+        return f"HTTP {response.status_code}{suffix}"
+    return str(exc)
+
+
 class TokenManager:
     """Auto-refreshing token accessor.
 
@@ -257,6 +278,13 @@ class TokenManager:
     def access_token(self) -> str:
         """Return a valid user-context access token, refreshing if needed."""
         bundle = self._load_or_raise()
+        if bundle.needs_refresh:
+            # auth_setup.py and another app process can replace the token file
+            # while this long-lived Streamlit resource still holds an old bundle.
+            stored = self._store.load()
+            if stored is not None and stored.access_token != bundle.access_token:
+                self._cached = stored
+                bundle = stored
         if bundle.needs_refresh and bundle.refresh_token:
             try:
                 new_bundle = refresh_tokens(
@@ -264,14 +292,25 @@ class TokenManager:
                     client_secret=self._settings.x.client_secret,
                     refresh_token=bundle.refresh_token,
                 )
+                if not new_bundle.refresh_token:
+                    new_bundle.refresh_token = bundle.refresh_token
                 new_bundle.bearer_token = bundle.bearer_token or self._settings.x.bearer_token
                 self._store.save(new_bundle)
                 self._cached = new_bundle
                 return new_bundle.access_token
             except httpx.HTTPError as exc:
+                # A concurrent process may have refreshed and rotated the token
+                # while this request was in flight. Prefer that fresh bundle.
+                stored = self._store.load()
+                if (
+                    stored is not None
+                    and stored.access_token != bundle.access_token
+                    and not stored.needs_refresh
+                ):
+                    self._cached = stored
+                    return stored.access_token
                 raise RuntimeError(
-                    f"Token refresh failed: {exc}. Re-authorize via: "
-                    f"python scripts/auth_setup.py"
+                    f"Token refresh failed ({_refresh_error_detail(exc)})"
                 ) from exc
         return bundle.access_token
 

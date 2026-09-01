@@ -7,7 +7,8 @@ minimax:
   # its budget inside the think block, returning no JSON.
   max_tokens: 2048
 x:
-  recent_max_results: 3
+  # Fetch the five most recent posts per configured account.
+  recent_max_results: 5
   exclude:
   - replies
   - retweets
