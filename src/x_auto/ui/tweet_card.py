@@ -32,6 +32,8 @@ from pathlib import Path
 
 import streamlit as st
 
+from ..utils.files import is_video_path
+
 # X-style palette (close enough for a preview).
 _AVATAR_BG = "#1d9bf0"
 _AVATAR_BG_REPLY = "#536471"
@@ -161,11 +163,14 @@ def _render_one_full(
             try:
                 path = Path(p)
                 if path.exists() and path.is_file():
-                    st.image(str(path), use_container_width=True)
+                    if is_video_path(path):
+                        st.video(str(path))
+                    else:
+                        st.image(str(path), use_container_width=True)
                 else:
-                    st.caption(f"🖼  (image missing: {Path(p).name})")
+                    st.caption(f"📎  (media missing: {Path(p).name})")
             except (OSError, ValueError):
-                st.caption(f"🖼  (image unreadable: {Path(p).name})")
+                st.caption(f"📎  (media unreadable: {Path(p).name})")
 
     # The earlier revision rendered a fake action bar
     # ("↩ Reply · ♺ Repost · ❤ Like") at the bottom of every full
@@ -201,11 +206,14 @@ def _render_one_compact(
             try:
                 path = Path(p)
                 if path.exists() and path.is_file():
-                    st.image(str(path), use_container_width=True)
+                    if is_video_path(path):
+                        st.video(str(path))
+                    else:
+                        st.image(str(path), use_container_width=True)
                 else:
-                    st.caption(f"🖼  (image missing: {Path(p).name})")
+                    st.caption(f"📎  (media missing: {Path(p).name})")
             except (OSError, ValueError):
-                st.caption(f"🖼  (image unreadable: {Path(p).name})")
+                st.caption(f"📎  (media unreadable: {Path(p).name})")
 
 
 

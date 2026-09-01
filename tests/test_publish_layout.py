@@ -44,7 +44,6 @@ render(
     db,
     _FakeClient(),
     ai=None,
-    on_schedule=lambda *a, **kw: 1,
 )
 """
     at = AppTest.from_string(script)
@@ -88,7 +87,6 @@ render(
     db,
     _FakeClient(),
     ai=None,
-    on_schedule=lambda *a, **kw: 1,
 )
 """
     at = AppTest.from_string(script)

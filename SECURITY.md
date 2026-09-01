@@ -20,7 +20,6 @@ The following paths must remain untracked:
 - `data/oauth_tokens.json`
 - `data/*.db` and `data/*.sqlite`
 - `data/media_cache/`
-- `data/scheduler.lock`
 
 If any credential is committed, revoke or rotate it immediately. Removing it
 from the latest commit is not sufficient; it must also be purged from Git

@@ -8,9 +8,8 @@ from pydantic import BaseModel, Field, HttpUrl
 
 TweetStatus = Literal["new", "selected", "archived"]
 WritingMode = Literal["rephrase", "original_take"]
-DraftStatus = Literal["draft", "final", "scheduled", "posted", "failed"]
+DraftStatus = Literal["draft", "final", "posted", "failed"]
 PostLogResult = Literal["success", "failed", "rate_limited", "auth_error"]
-ScheduleStatus = Literal["pending", "fired", "failed", "cancelled"]
 
 
 class Account(BaseModel):
@@ -54,7 +53,6 @@ class Draft(BaseModel):
     status: DraftStatus = "draft"
     created_at: datetime | None = None
     finalized_at: datetime | None = None
-    scheduled_at: datetime | None = None
     posted_at: datetime | None = None
     x_tweet_id: str | None = None
     x_reply_id: str | None = None
@@ -72,16 +70,6 @@ class PostLogEntry(BaseModel):
     created_at: datetime | None = None
 
 
-class Schedule(BaseModel):
-    id: int | None = None
-    draft_id: int
-    fire_at: datetime
-    status: ScheduleStatus = "pending"
-    attempts: int = 0
-    last_error: str | None = None
-    created_at: datetime | None = None
-
-
 # How long an X media_id stays valid for re-use. X's docs say
 # media_ids are good for at most 24 hours; we treat anything older
 # as expired and re-upload.
@@ -89,10 +77,10 @@ MEDIA_ID_TTL_SECONDS = 24 * 60 * 60
 
 
 class MediaUpload(BaseModel):
-    """A local image cache entry that may or may not be uploaded to X yet.
+    """A local media cache entry that may or may not be uploaded to X yet.
 
     `local_path` is the absolute path under data/media_cache/.
-    `x_media_id` is None until the first time the image is actually
+    `x_media_id` is None until the first time the media is actually
     posted. After that, it stays valid for ~24h per X's API docs;
     the publish flow re-uses it when still fresh and re-uploads when
     expired.

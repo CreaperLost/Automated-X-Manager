@@ -43,6 +43,7 @@ data/*.sqlite-*
 data/oauth_tokens.json
 data/media_cache/
 data/scheduler.lock
+data/x-automation.pid
 *.log
 .tmp_*
 
@@ -53,5 +54,8 @@ Thumbs.db
 # Editor and local agent metadata
 .vscode/
 .idea/
-.codex/
+.codex/*
+!.codex/environments/
+.codex/environments/*
+!.codex/environments/environment.toml
 .agents/

@@ -1,15 +1,12 @@
 """Shared "post a draft" workflow.
 
-Both Queue (one-click "Post" on a draft card) and the
-scheduler's fire-job need to: upload any attached images, create the
-main post, create the reply (if there's a project link), update the
-draft row, and log the post. This module centralises that flow so we
-don't drift between the two callers.
+Queue and Create both need to upload attached media, create the main
+post, create the reply (if there is a project link), update the draft
+row, and log the post. This module centralises that flow.
 
 Two entry points:
 
-* :func:`publish_draft` (async) — the canonical implementation. The
-  scheduler uses it inside its event loop.
+* :func:`publish_draft` (async) — the canonical implementation.
 
 * :func:`publish_draft_sync` — a thin ``asyncio.run`` wrapper for
   Streamlit, which is synchronous and can't ``await`` directly. It
@@ -37,10 +34,11 @@ import httpx
 from ..config import Settings
 from ..store.models import Draft
 from ..store.repos import Database
+from ..utils.files import is_video_path
 from ..utils.text import validate_post_body
 from .client import API_BASE, USER_AGENT, XClient
 from .costs import estimate_post_cost
-from .media import upload_image_cached
+from .media import upload_media_cached
 
 
 @dataclass
@@ -84,7 +82,11 @@ async def publish_draft(
         draft.quote_tweet_id = None
         db.update_draft(draft)
 
-    # Upload any attached images, reusing cached media_ids when fresh.
+    video_count = sum(is_video_path(path) for path in draft.image_paths)
+    if video_count and len(draft.image_paths) != 1:
+        raise PublishValidationError("A video must be the only media attachment.")
+
+    # Upload any attached media, reusing cached media_ids when fresh.
     media_ids: list[str] = []
     for p in draft.image_paths:
         path = Path(p)
@@ -94,7 +96,7 @@ async def publish_draft(
             if alt.exists():
                 path = alt
         media_ids.append(
-            upload_image_cached(path, token_manager=x_client.tokens, db=db)
+            upload_media_cached(path, token_manager=x_client.tokens, db=db)
         )
 
     # Main post (no inline URL — that's the whole point of the
@@ -154,7 +156,7 @@ def publish_draft_sync(
     ``x_client._http`` (httpx ``AsyncClient``) holding connections
     bound to the previous loop. The next call then fails with
     ``RuntimeError: Event loop is closed`` when httpx tries to
-    schedule connection cleanup on the closed loop.
+    run connection cleanup on the closed loop.
 
     Fix: build a one-shot ``XClient`` that shares the auth state
     (``token_manager``) and the session meter with the long-lived

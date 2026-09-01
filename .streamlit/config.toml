@@ -4,6 +4,7 @@ developmentMode = false
 [server]
 headless = true
 port = 8501
+maxUploadSize = 512
 
 [client]
 toolbarMode = "minimal"

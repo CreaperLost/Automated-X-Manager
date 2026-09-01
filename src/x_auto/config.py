@@ -108,12 +108,6 @@ class XSettings:
 
 
 @dataclass(frozen=True)
-class ScheduleSettings:
-    max_lookahead_days: int = 30
-    min_lead_minutes: int = 5
-
-
-@dataclass(frozen=True)
 class UISettings:
     page_title: str = "X-Automation"
     cost_warning_threshold_usd: float = 1.00
@@ -127,7 +121,6 @@ class Settings:
     accounts: tuple[dict[str, str], ...]
     minimax: MinimaxSettings
     x: XSettings
-    schedule: ScheduleSettings
     ui: UISettings
 
 
@@ -165,12 +158,6 @@ def get_settings() -> Settings:
         rate_limit_buffer_seconds=int(x_raw.get("rate_limit_buffer_seconds", 5)),
     )
 
-    sched_raw = raw.get("schedule", {}) or {}
-    schedule = ScheduleSettings(
-        max_lookahead_days=int(sched_raw.get("max_lookahead_days", 30)),
-        min_lead_minutes=int(sched_raw.get("min_lead_minutes", 5)),
-    )
-
     ui_raw = raw.get("ui", {}) or {}
     ui = UISettings(
         page_title=str(ui_raw.get("page_title", "X-Automation")),
@@ -184,6 +171,5 @@ def get_settings() -> Settings:
         accounts=tuple(load_accounts()),
         minimax=minimax,
         x=x_settings,
-        schedule=schedule,
         ui=ui,
     )

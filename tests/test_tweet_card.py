@@ -123,7 +123,7 @@ class TestImages:
             body="x",
             image_paths=["C:/this/path/does/not/exist/missing.png"],
         )
-        assert "image missing" in _all_captions(at)
+        assert "media missing" in _all_captions(at)
 
     def test_existing_image_does_not_crash(self):
         # A minimal valid 1x1 PNG. st.image may not render it in

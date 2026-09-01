@@ -99,7 +99,6 @@ def test_unconfigured_client_raises_helpfully():
             api_key="",  # <- not configured
         ),
         x=None,  # type: ignore[arg-type]
-        schedule=None,  # type: ignore[arg-type]
         ui=None,  # type: ignore[arg-type]
     )
     ai = AIClient(s)

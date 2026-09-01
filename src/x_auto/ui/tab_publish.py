@@ -1,12 +1,10 @@
-"""Tab 4 — Publish: drafts, schedule, posted history.
+"""Queue UI for drafts and posted history.
 
 Lifecycle (single path, no intermediate "final" state):
-  1. **Drafts** (status="draft" or "final") — compact 3-up grid; one-click
-     **Post now** or **Schedule** (date picker in popover). Also **Open
-     in Create** and **Discard** in the popover.
-  2. **Scheduled** — pending schedule rows + fire time.
-  3. **Published** — status="posted" rows; **Repost** / **Paraphrase & Repost**.
-  4. **Recent post log** — last 20 log entries.
+  1. **Drafts** (status="draft" or "final") — compact 3-up grid with
+     one-click **Post**, plus **Open in Create** and **Discard**.
+  2. **Published** — status="posted" rows; **Repost** / **Paraphrase & Repost**.
+  3. **Recent post log** — last 20 log entries.
 
 The previous version had a separate "Final drafts" section that required
 a "Promote to final" click before posting. That was a friction the
@@ -19,7 +17,7 @@ tab. The compact mode is used here for the 1/3-width Draft cards.
 """
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import streamlit as st
 
@@ -33,14 +31,13 @@ from ..utils.text import contains_url, validate_post_body
 from ..x.client import AuthExpiredError, RateLimitedError, XApiError, XClient
 from ..x.costs import estimate_post_cost
 from ..x.publish import publish_draft_sync
-from .tab_create import _tomorrow_rounded
 from .tweet_card import render_tweet_preview
 
 # Session-state keys (kept short and tab-prefixed).
 _KEY_PARAPHRASE = "publish_paraphrase_preview"  # {draft_id: {body, reply, reasoning}}
 _KEY_LAST_POST = "publish_last_post_result"  # {"kind": "success"|"error", "message": str}
 
-# Statuses that are still "in the queue" (not yet posted, not scheduled).
+# Statuses that are still in the queue.
 # "final" is included for backward compatibility with older drafts that
 # were marked final before the flow was simplified.
 _PENDING_STATUSES = ("draft", "final")
@@ -51,10 +48,6 @@ def render(
     db: Database,
     x_client: XClient,
     ai: AIClient,
-    *,
-    on_schedule,
-    on_reschedule=None,
-    on_cancel_schedule=None,
 ) -> None:
     st.header("Queue")
     # No global caption — each section has its own one-liner below.
@@ -77,65 +70,15 @@ def render(
     # ---- 1. Drafts (the queue) — 3-up grid, compact, one-click Post -------
     st.markdown("### Drafts")
     st.caption(
-        "Post a draft now, or schedule it for later. "
-        "The ⋯ popover has edit / discard."
+        "Post a draft now. The ⋯ popover has edit / discard."
     )
     pending = _list_pending(db, limit=60)
     if not pending:
         st.caption("No drafts in the queue. Generate one in **Create**.")
     else:
-        _render_drafts_grid(
-            settings, db, x_client, pending, on_schedule
-        )
+        _render_drafts_grid(settings, db, x_client, pending)
 
-    # ---- 2. Scheduled -----------------------------------------------------
-    st.markdown("---")
-    st.markdown("### Scheduled")
-    st.caption("Drafts queued to post at a future time.")
-    scheduled = db.list_schedules(status="pending", limit=20)
-    if not scheduled:
-        st.caption("None.")
-    else:
-        for s in scheduled:
-            draft = db.get_draft(s.draft_id)
-            label = (
-                (draft.body[:60] + "…")
-                if draft and len(draft.body) > 60
-                else (draft.body if draft else "?")
-            )
-            with st.container(border=True):
-                st.markdown(
-                    f"**{_fmt_dt(s.fire_at)}** — draft #{s.draft_id} `{label}`"
-                )
-                edit_col, cancel_col = st.columns(2)
-                with edit_col:
-                    revised = st.datetime_input(
-                        "New time", value=_tomorrow_rounded(),
-                        min_value=datetime.now() + timedelta(
-                            minutes=settings.schedule.min_lead_minutes
-                        ),
-                        max_value=datetime.now() + timedelta(
-                            days=settings.schedule.max_lookahead_days
-                        ),
-                        key=f"queue_reschedule_at_{s.id}",
-                    )
-                    if st.button(
-                        "Reschedule", key=f"queue_reschedule_{s.id}",
-                        use_container_width=True, disabled=on_reschedule is None,
-                    ):
-                        on_reschedule(s.id, s.draft_id, revised)
-                        st.rerun()
-                with cancel_col:
-                    st.caption("Return this post to Drafts without publishing it.")
-                    if st.button(
-                        "Cancel schedule", key=f"queue_cancel_schedule_{s.id}",
-                        use_container_width=True,
-                        disabled=on_cancel_schedule is None,
-                    ):
-                        on_cancel_schedule(s.id, s.draft_id)
-                        st.rerun()
-
-    # ---- 3. Published (repost / paraphrase) --------------------------------
+    # ---- 2. Published (repost / paraphrase) --------------------------------
     st.markdown("---")
     st.markdown("### Published")
     st.caption("Re-post or paraphrase any of your past tweets.")
@@ -147,7 +90,7 @@ def render(
             settings, db, x_client, ai, published
         )
 
-    # ---- 4. Recent post log -----------------------------------------------
+    # ---- 3. Recent post log -----------------------------------------------
     st.markdown("---")
     st.markdown("### Recent post log")
     for entry in db.recent_log(limit=20):
@@ -171,7 +114,6 @@ def _render_drafts_grid(
     db: Database,
     x_client: XClient,
     drafts: list[Draft],
-    on_schedule,
 ) -> None:
     """3-up grid of compact draft cards. Each card has a clear "Post"
     primary action and a popover for everything else."""
@@ -184,9 +126,7 @@ def _render_drafts_grid(
         cols = st.columns(3, gap="small")
         for col, d in zip(cols, chunk, strict=False):
             with col:
-                _render_draft_card_compact(
-                    settings, db, x_client, d, on_schedule
-                )
+                _render_draft_card_compact(settings, db, x_client, d)
 
 
 def _render_draft_card_compact(
@@ -194,7 +134,6 @@ def _render_draft_card_compact(
     db: Database,
     x_client: XClient,
     draft: Draft,
-    on_schedule,
 ) -> None:
     """A 1/3-width draft card with a single primary "Post" action."""
     cost = estimate_post_cost(
@@ -253,35 +192,8 @@ def _render_draft_card_compact(
             _post_now(settings, db, x_client, draft)
             st.rerun()
 
-        # Popover for everything else: schedule, open in create, discard.
+        # Popover for edit and discard.
         with st.popover("⋯", use_container_width=True, help="More actions"):
-            st.caption("**Schedule for later**")
-            default_fire = _tomorrow_rounded()
-            min_fire = datetime.now() + timedelta(
-                minutes=settings.schedule.min_lead_minutes
-            )
-            max_fire = datetime.now() + timedelta(
-                days=settings.schedule.max_lookahead_days
-            )
-            fire_at = st.datetime_input(
-                "Fire at",
-                value=default_fire,
-                min_value=min_fire,
-                max_value=max_fire,
-                key=f"sched_at_{draft.id}",
-                label_visibility="collapsed",
-            )
-            if st.button(
-                "Schedule",
-                key=f"sched_{draft.id}",
-                use_container_width=True,
-            ):
-                schedule_id = on_schedule(draft.id, fire_at)
-                st.success(f"Scheduled for {fire_at} (#{schedule_id}).")
-                st.rerun()
-
-            st.markdown("---")
-
             if st.button(
                 "Open in Create ↗",
                 key=f"publish_open_create_{draft.id}",

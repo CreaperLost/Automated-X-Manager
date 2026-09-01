@@ -1,9 +1,8 @@
 """SQLite connection + schema migrations.
 
 Single source of truth for the schema. Migrations are applied on
-startup; they are idempotent and additive. WAL mode for concurrent
-read/write between the Streamlit UI thread and the APScheduler
-worker.
+startup; they are idempotent and additive. WAL mode keeps local
+reads and writes responsive.
 """
 from __future__ import annotations
 
@@ -57,7 +56,6 @@ SCHEMA: list[str] = [
         status           TEXT NOT NULL DEFAULT 'draft',
         created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         finalized_at     TIMESTAMP,
-        scheduled_at     TIMESTAMP,
         posted_at        TIMESTAMP,
         x_tweet_id       TEXT,
         x_reply_id       TEXT,
@@ -78,18 +76,6 @@ SCHEMA: list[str] = [
     )
     """,
     "CREATE INDEX IF NOT EXISTS idx_post_log_draft ON post_log(draft_id, created_at DESC)",
-    """
-    CREATE TABLE IF NOT EXISTS schedules (
-        id               INTEGER PRIMARY KEY AUTOINCREMENT,
-        draft_id         INTEGER NOT NULL REFERENCES drafts(id),
-        fire_at          TIMESTAMP NOT NULL,
-        status           TEXT NOT NULL DEFAULT 'pending',
-        attempts         INTEGER NOT NULL DEFAULT 0,
-        last_error       TEXT,
-        created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-    """,
-    "CREATE INDEX IF NOT EXISTS idx_schedules_status ON schedules(status, fire_at)",
     """
     CREATE TABLE IF NOT EXISTS media_uploads (
         id                       INTEGER PRIMARY KEY AUTOINCREMENT,

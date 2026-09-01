@@ -119,20 +119,3 @@ def test_post_log_roundtrip(db: Database):
     assert rows[0]["action"] == "post_now"
     assert rows[0]["cost_usd"] == 0.030
     assert db.total_session_cost() == 0.030
-
-
-def test_schedules_lifecycle(db: Database):
-    from datetime import datetime, timedelta
-
-    from x_auto.store.models import Draft
-    draft_id = db.create_draft(Draft(body="x", status="final"))
-    fire_at = datetime.now() + timedelta(hours=1)
-    sched_id = db.create_schedule(draft_id, fire_at)
-    assert sched_id > 0
-    pending = db.list_schedules(status="pending")
-    assert len(pending) == 1
-    nxt = db.next_pending_schedule()
-    assert nxt is not None
-    assert nxt.draft_id == draft_id
-    db.mark_schedule_fired(sched_id)
-    assert db.next_pending_schedule() is None

@@ -33,7 +33,7 @@ Persistence model
   workflow finishes (status="draft").
 * The form's text inputs edit the same draft row automatically.
   **Discard** deletes the row. Queue
-  takes over from there: drafts post or schedule with one click.
+  takes over from there: drafts post with one click.
 * The namespaced session state (:class:`CreateState`) holds the id
   of the row the form is currently bound to, the last workflow
   result, and the picked image-library path. The data itself
@@ -43,7 +43,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -56,13 +56,22 @@ from ..ai.workflow import DraftWorkflow
 from ..config import Settings
 from ..store.models import Draft, MediaUpload
 from ..store.repos import Database
-from ..utils.files import ALLOWED_IMAGE_MIMES, mime_from_extension, validate_image
+from ..utils.files import (
+    ALLOWED_IMAGE_MIMES,
+    is_video_path,
+    mime_from_extension,
+    validate_image,
+)
+from ..utils.media_library import ensure_project_media_dirs, list_media
 from ..utils.text import contains_url, x_char_count
 from .tweet_card import render_tweet_preview
 
 # Character thresholds (X allows 280).
 SOFT_CHAR_WARN = 260
 HARD_CHAR_CAP = 320
+MEDIA_FOLDER_COLUMNS = 5
+MEDIA_IMAGE_COLUMNS = 6
+_UNSORTED_MEDIA = "__unsorted__"
 
 
 # ---- Session-state namespace -------------------------------------------------
@@ -79,6 +88,7 @@ class CreateState:
     editing_draft_id: int | None = None
     last_workflow: Any | None = None
     picked_image_path: str | None = None
+    media_project: str | None = None
 
 
 _STATE_KEY = "create_state"
@@ -99,7 +109,6 @@ def render(
     ai: AIClient,
     *,
     x_client=None,
-    on_schedule=None,
 ) -> None:
     st.header("Create")
     st.caption(
@@ -184,7 +193,7 @@ def render(
     attachment_options = ["None"]
     if source.source_image_url:
         attachment_options.append("Use source image")
-    attachment_options.append("Upload/use my image")
+    attachment_options.append("Upload/use my media")
     attachment = st.radio(
         "Attachment",
         attachment_options,
@@ -194,15 +203,27 @@ def render(
     upload = None
     if attachment == "Use source image" and source.source_image_url:
         st.image(source.source_image_url, width=320)
-    elif attachment == "Upload/use my image":
-        upload = st.file_uploader(
-            "Image",
-            type=["jpg", "jpeg", "png", "gif", "webp"],
-            accept_multiple_files=False,
-            key="create_image",
-            label_visibility="collapsed",
-        )
-        _render_image_library(db, settings)
+    elif attachment == "Upload/use my media":
+        media_dir = _render_image_library(db, settings, projects)
+        if media_dir is not None:
+            upload_kind = st.radio(
+                "Upload type",
+                ["Image", "Video"],
+                horizontal=True,
+                key=f"create_media_kind_{_state().media_project}",
+                help="Choose Video to upload an MP4, MOV, or WebM file.",
+            )
+            if upload_kind == "Video":
+                upload_types = ["mp4", "mov", "webm"]
+            else:
+                upload_types = ["jpg", "jpeg", "png", "gif", "webp", "avif"]
+            upload = st.file_uploader(
+                f"Upload {upload_kind.lower()} to {_state().media_project}",
+                type=upload_types,
+                accept_multiple_files=False,
+                key=f"create_{upload_kind.lower()}_{_state().media_project}",
+                help=f"The file will be saved in `{media_dir.relative_to(settings.data_dir)}`.",
+            )
 
     st.markdown("**Extra instructions (optional)**")
     extra = st.text_area(
@@ -237,7 +258,7 @@ def render(
     last_result = _state().last_workflow
     _render_editor_with_preview(
         settings, db, draft, last_workflow=last_result,
-        x_client=x_client, on_schedule=on_schedule,
+        x_client=x_client,
     )
 
     # ---- 3. Saved drafts list (Load / Discard) --------------------------
@@ -274,17 +295,25 @@ def _on_generate(
         except ValueError as exc:
             st.error(f"Couldn't use the source image: {exc}")
             return
-    elif attachment == "Upload/use my image":
+    elif attachment == "Upload/use my media":
         picked_path = state.picked_image_path
         if picked_path and Path(picked_path).exists():
             image_paths = [picked_path]
         elif upload is not None:
-            image_paths = _save_upload(upload, settings.data_dir / "media_cache")
+            media_dirs = ensure_project_media_dirs(
+                settings.data_dir / "media_cache",
+                (project["name"] for project in projects),
+            )
+            upload_dir = media_dirs.get(state.media_project or "")
+            if upload_dir is None:
+                st.error("Choose a project media folder before uploading media.")
+                return
+            image_paths = _save_upload(upload, upload_dir)
             if not image_paths:
-                st.error("Failed to save the upload.")
+                st.error("Failed to save the media upload.")
                 return
     if image_paths:
-        st.caption(f"Image attached: `{Path(image_paths[0]).name}`")
+        st.caption(f"Media attached: `{Path(image_paths[0]).name}`")
 
     # Run the 4-step workflow: understand → rephrase → match+CTA → fill.
     # Two LLM calls (rephrase + match), each focused on one job.
@@ -331,7 +360,6 @@ def _render_editor_with_preview(
     *,
     last_workflow=None,
     x_client=None,
-    on_schedule=None,
 ) -> None:
     """Edit the draft and see a live preview.
 
@@ -444,40 +472,17 @@ def _render_editor_with_preview(
 
     if x_client is not None:
         st.markdown("**Publish**")
-        post_col, schedule_col = st.columns(2)
-        with post_col:
-            if st.button(
-                "Post now", key=f"create_post_{draft.id}",
-                type="primary", use_container_width=True,
-            ):
-                # Reuse Queue's deterministic preflight and result banner.
-                from .tab_publish import _post_now
+        if st.button(
+            "Post now", key=f"create_post_{draft.id}",
+            type="primary", use_container_width=True,
+        ):
+            # Reuse Queue's deterministic preflight and result banner.
+            from .tab_publish import _post_now
 
-                latest = db.get_draft(draft.id) or draft
-                _post_now(settings, db, x_client, latest)
-                st.session_state["requested_view"] = "Queue"
-                st.rerun()
-        with schedule_col:
-            default_fire = _tomorrow_rounded()
-            fire_at = st.datetime_input(
-                "Schedule for",
-                value=default_fire,
-                min_value=datetime.now() + timedelta(
-                    minutes=settings.schedule.min_lead_minutes
-                ),
-                max_value=datetime.now() + timedelta(
-                    days=settings.schedule.max_lookahead_days
-                ),
-                key=f"create_schedule_at_{draft.id}",
-            )
-            if st.button(
-                "Schedule", key=f"create_schedule_{draft.id}",
-                use_container_width=True, disabled=on_schedule is None,
-            ):
-                schedule_id = on_schedule(draft.id, fire_at)
-                st.success(f"Scheduled for {fire_at} (#{schedule_id}).")
-                st.session_state["requested_view"] = "Queue"
-                st.rerun()
+            latest = db.get_draft(draft.id) or draft
+            _post_now(settings, db, x_client, latest)
+            st.session_state["requested_view"] = "Queue"
+            st.rerun()
 
     if st.button(
         "Discard",
@@ -523,7 +528,7 @@ def _cache_source_image(settings: Settings, db: Database, source) -> str:
         raise ValueError(f"unsupported image type {mime or 'unknown'}")
     ext = {
         "image/jpeg": ".jpg", "image/png": ".png",
-        "image/gif": ".gif", "image/webp": ".webp",
+        "image/gif": ".gif", "image/webp": ".webp", "image/avif": ".avif",
     }[mime]
     cache_dir = settings.data_dir / "media_cache"
     cache_dir.mkdir(parents=True, exist_ok=True)
@@ -543,54 +548,115 @@ def _cache_source_image(settings: Settings, db: Database, source) -> str:
     return str(dest)
 
 
-def _tomorrow_rounded(now: datetime | None = None) -> datetime:
-    """Tomorrow at the current local time, rounded up to 15 minutes."""
-    base = (now or datetime.now()) + timedelta(days=1)
-    rounded_minute = ((base.minute + 14) // 15) * 15
-    if rounded_minute == 60:
-        base = base + timedelta(hours=1)
-        rounded_minute = 0
-    return base.replace(minute=rounded_minute, second=0, microsecond=0)
-
-
-def _render_image_library(db: Database, settings: Settings) -> None:
-    """Inline "Pick from library" picker under the file uploader."""
-    from ..store.models import MEDIA_ID_TTL_SECONDS
-
+def _render_image_library(
+    db: Database,
+    settings: Settings,
+    projects: list[dict],
+) -> Path | None:
+    """Render project folders first, then a six-column image picker."""
     cache_dir = settings.data_dir / "media_cache"
-    rows = db.list_media_uploads(limit=50)
+    project_dirs = ensure_project_media_dirs(
+        cache_dir,
+        (project["name"] for project in projects),
+    )
+    unsorted_images = list_media(cache_dir)
+    folders: list[tuple[str, Path, bool]] = [
+        (name, folder, True) for name, folder in project_dirs.items()
+    ]
+    if unsorted_images:
+        folders.append(("Unsorted", cache_dir, False))
 
-    on_disk: set[str] = set()
-    if cache_dir.exists():
-        for p in cache_dir.iterdir():
-            if p.is_file():
-                on_disk.add(str(p.resolve()))
-    db_paths: set[str] = {r.local_path for r in rows}
-    for path in on_disk - db_paths:
-        rows.append(_local_row_to_upload(path, cache_dir))
+    state = _state()
+    valid_selection_keys = set(project_dirs) | (
+        {_UNSORTED_MEDIA} if unsorted_images else set()
+    )
+    if state.media_project not in valid_selection_keys:
+        state.media_project = None
 
-    if not rows:
-        st.caption("No images in library yet. Upload one above to start.")
-        return
+    image_counts = {str(folder): len(list_media(folder)) for _, folder, _ in folders}
+    total_images = sum(image_counts.values())
+    with st.expander(
+        f"📁 Project media · {len(project_dirs)} folders · {total_images} files",
+        expanded=True,
+    ):
+        if state.media_project is None:
+            st.caption(
+                "Choose a project folder. Images stay grouped by project; "
+                f"previews open {MEDIA_IMAGE_COLUMNS} per row."
+            )
+            for start in range(0, len(folders), MEDIA_FOLDER_COLUMNS):
+                columns = st.columns(MEDIA_FOLDER_COLUMNS)
+                for offset, (name, folder, is_project) in enumerate(
+                    folders[start:start + MEDIA_FOLDER_COLUMNS]
+                ):
+                    with columns[offset]:
+                        count = image_counts[str(folder)]
+                        if st.button(
+                            f"📁 {name}\n{count} file{'s' if count != 1 else ''}",
+                            key=f"media_folder_{start + offset}",
+                            use_container_width=True,
+                        ):
+                            state.media_project = name if is_project else _UNSORTED_MEDIA
+                            state.picked_image_path = None
+                            st.rerun()
+            return None
 
-    with st.expander(f"📷 Image library ({len(rows)})", expanded=False):
+        if state.media_project == _UNSORTED_MEDIA:
+            selected_name = "Unsorted"
+            selected_dir = cache_dir
+            selected_is_project = False
+        else:
+            selected_name = state.media_project
+            selected_dir = project_dirs[selected_name]
+            selected_is_project = True
+
+        back_col, title_col = st.columns([1, 5])
+        with back_col:
+            if st.button("← Folders", key="media_folder_back", use_container_width=True):
+                state.media_project = None
+                state.picked_image_path = None
+                st.rerun()
+        with title_col:
+            st.markdown(f"**📂 {selected_name}**")
+
+        rows = _media_rows_for_folder(db, selected_dir)
+        if rows:
+            picked = state.picked_image_path
+            for start in range(0, len(rows), MEDIA_IMAGE_COLUMNS):
+                columns = st.columns(MEDIA_IMAGE_COLUMNS)
+                for offset, row in enumerate(rows[start:start + MEDIA_IMAGE_COLUMNS]):
+                    with columns[offset]:
+                        _render_library_card(row, picked == row.local_path)
+        else:
+            st.info("This folder has no images or videos yet.")
+
+        if selected_is_project:
+            relative = selected_dir.relative_to(settings.data_dir)
+            st.caption(f"New images and videos will be saved to `{relative}`.")
+            return selected_dir
+
         st.caption(
-            "Re-use an image you've already uploaded. The publish "
-            "flow reuses the cached X `media_id` if it's still valid "
-            f"(< {MEDIA_ID_TTL_SECONDS // 3600}h old); otherwise it "
-            "re-uploads automatically."
+            "These are older media files stored at the media-cache root. "
+            "Choose a project folder to add new media."
         )
-        picked = _state().picked_image_path
-        for i in range(0, len(rows), 3):
-            cols = st.columns(3)
-            for col, row in zip(cols, rows[i:i + 3], strict=False):
-                with col:
-                    _render_library_card(row, picked == row.local_path)
+        return None
 
 
-def _local_row_to_upload(local_path: str, cache_dir: Path):
-    from ..store.models import MediaUpload
+def _media_rows_for_folder(db: Database, folder: Path) -> list[MediaUpload]:
+    """Merge files on disk with cached X upload metadata for one folder."""
+    db_rows = db.list_media_uploads(limit=1000)
+    by_path = {
+        str(Path(row.local_path).resolve()): row
+        for row in db_rows
+    }
+    rows: list[MediaUpload] = []
+    for path in list_media(folder):
+        resolved = str(path.resolve())
+        rows.append(by_path.get(resolved) or _local_row_to_upload(resolved))
+    return rows
 
+
+def _local_row_to_upload(local_path: str) -> MediaUpload:
     p = Path(local_path)
     try:
         size = p.stat().st_size
@@ -607,39 +673,21 @@ def _local_row_to_upload(local_path: str, cache_dir: Path):
 
 
 def _render_library_card(row, is_picked: bool) -> None:
-    from datetime import datetime
-
-    from ..store.models import MEDIA_ID_TTL_SECONDS
-
     path = Path(row.local_path)
-    label = f"**{row.filename}**" + ("  ✓" if is_picked else "")
-    st.markdown(label)
-
     try:
-        if path.exists() and path.stat().st_size < 5 * 1024 * 1024:
-            st.image(str(path), use_container_width=True)
+        if path.exists() and is_video_path(path):
+            st.video(str(path))
+        elif path.exists() and path.stat().st_size < 5 * 1024 * 1024:
+            st.image(str(path), width="stretch")
         else:
             st.caption("(file missing or too large)")
     except OSError:
         st.caption("(file missing)")
 
+    label = f"{row.filename}" + ("  ✓" if is_picked else "")
+    st.caption(label)
     if row.size:
         st.caption(f"{row.size // 1024} KB")
-    if row.x_media_id and row.x_media_id_uploaded_at:
-        age_s = (datetime.now() - row.x_media_id_uploaded_at).total_seconds()
-        if age_s < MEDIA_ID_TTL_SECONDS:
-            hours_left = (MEDIA_ID_TTL_SECONDS - age_s) / 3600
-            st.caption(
-                f"✅ Cached — valid for {hours_left:0.1f}h "
-                f"(`{row.x_media_id}`)"
-            )
-        else:
-            st.caption(
-                f"⚠️ Cached id expired ({age_s / 3600:0.1f}h old) — "
-                "will re-upload on next post"
-            )
-    else:
-        st.caption("Not yet uploaded to X")
 
     btn_label = "✓ Using this" if is_picked else "Use this"
     if st.button(btn_label, key=f"use_lib_{row.local_path}", use_container_width=True):

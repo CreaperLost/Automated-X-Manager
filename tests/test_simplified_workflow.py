@@ -6,13 +6,8 @@ import httpx
 
 from x_auto.store.models import Tweet
 from x_auto.store.repos import Database
-from x_auto.ui.tab_create import _cache_source_image, _tomorrow_rounded
+from x_auto.ui.tab_create import _cache_source_image
 from x_auto.ui.tab_sources import _filter
-
-
-def test_schedule_default_is_tomorrow_and_rounded():
-    now = datetime(2026, 8, 29, 18, 7, 31)
-    assert _tomorrow_rounded(now) == datetime(2026, 8, 30, 18, 15)
 
 
 def test_used_filter_is_derived_from_drafts():

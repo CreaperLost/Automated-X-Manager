@@ -1,10 +1,7 @@
 """Tests for the shared ``x_auto.x.publish`` module.
 
-The previous flow had the "upload → main → reply → update → log"
-sequence duplicated in two places: ``tab_publish._publish_draft``
-and ``scheduler/runner._do``. The shared module consolidates them.
-These tests pin the contract: one main + one reply, draft status
-flips to "posted", and a log row is written.
+These tests pin the shared publish contract: one main + one reply,
+draft status flips to "posted", and a log row is written.
 """
 from __future__ import annotations
 
@@ -65,6 +62,22 @@ def _make_draft(db: Database, **overrides) -> Draft:
 
 
 class TestPublishDraft:
+    def test_video_must_be_the_only_attachment(
+        self, configured_settings, x_client, tmp_db: Database, tmp_path: Path
+    ):
+        video = tmp_path / "clip.mp4"
+        image = tmp_path / "poster.png"
+        video.write_bytes(b"video")
+        image.write_bytes(b"image")
+        draft = _make_draft(
+            tmp_db,
+            image_paths=[str(video), str(image)],
+            link_url=None,
+        )
+
+        with pytest.raises(PublishValidationError, match="only media attachment"):
+            asyncio.run(publish_draft(configured_settings, tmp_db, x_client, draft))
+
     def test_legacy_third_party_quote_is_removed_before_write(
         self, configured_settings, x_client, tmp_db: Database
     ):
