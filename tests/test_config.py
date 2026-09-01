@@ -51,3 +51,19 @@ def test_minimax_api_key_from_env(monkeypatch):
     s = config.get_settings()
     assert s.minimax.api_key == "sk-test-xyz"
     assert s.minimax.configured is True
+
+
+def test_handle_file_add_remove_validate_and_dedupe(tmp_path):
+    from x_auto.config import load_accounts, write_accounts
+
+    config_dir = tmp_path / "config"
+    rows = write_accounts(
+        config_dir,
+        ["@OpenAI", "naval", "OPENAI", "bad handle!", "x" * 16, ""],
+    )
+    assert rows == [{"handle": "OpenAI"}, {"handle": "naval"}]
+    assert load_accounts(config_dir) == rows
+
+    rows = write_accounts(config_dir, ["naval"])
+    assert rows == [{"handle": "naval"}]
+    assert load_accounts(config_dir) == rows

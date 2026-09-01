@@ -1,0 +1,3 @@
+# Add monitored X usernames from the app's Handles sidebar.
+# This empty list prevents a fresh installation from making accidental reads.
+[]

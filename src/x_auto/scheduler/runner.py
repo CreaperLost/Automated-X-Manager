@@ -110,6 +110,43 @@ def schedule_draft(
     return schedule_id
 
 
+def reschedule_draft(
+    settings: Settings, db: Database, x_client: XClient,
+    schedule_id: int, draft_id: int, fire_at: datetime,
+) -> None:
+    """Move an existing pending schedule and its APScheduler job."""
+    sched = start(settings, db, x_client)
+    db.reschedule(schedule_id, fire_at)
+    sched.add_job(
+        _fire_scheduled, "date", run_date=fire_at,
+        args=[schedule_id, draft_id], id=f"schedule_{schedule_id}",
+        misfire_grace_time=300, coalesce=True, replace_existing=True,
+    )
+    draft = db.get_draft(draft_id)
+    if draft:
+        draft.status = "scheduled"
+        draft.scheduled_at = fire_at
+        db.update_draft(draft)
+
+
+def cancel_scheduled_draft(
+    settings: Settings, db: Database, x_client: XClient,
+    schedule_id: int, draft_id: int,
+) -> None:
+    """Cancel a pending schedule and return its draft to the queue."""
+    sched = start(settings, db, x_client)
+    for job_id in (f"schedule_{schedule_id}", f"late_{schedule_id}"):
+        job = sched.get_job(job_id)
+        if job is not None:
+            sched.remove_job(job_id)
+    db.cancel_schedule(schedule_id)
+    draft = db.get_draft(draft_id)
+    if draft and draft.status == "scheduled":
+        draft.status = "draft"
+        draft.scheduled_at = None
+        db.update_draft(draft)
+
+
 def _reap_late_pending(
     settings: Settings, db: Database, sched: BackgroundScheduler
 ) -> None:

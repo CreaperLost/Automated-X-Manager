@@ -12,7 +12,7 @@ import streamlit as st
 import yaml
 
 from ..ai.projects import csv_path, load_csv, sync_projects, write_csv
-from ..config import Settings
+from ..config import Settings, load_accounts, write_accounts
 from ..store.repos import Database
 
 MODEL_OPTIONS = [
@@ -29,6 +29,8 @@ def render_sidebar(
     with st.sidebar:
         st.markdown("### X-Automation")
         _render_model_picker(settings)
+        st.markdown("---")
+        _render_handles_editor(settings)
         st.markdown("---")
         _render_projects_editor(settings, db)
 
@@ -77,6 +79,61 @@ def _write_model_choice(settings: Settings, model_id: str) -> None:
         yaml.safe_dump(data, sort_keys=False, allow_unicode=True),
         encoding="utf-8",
     )
+
+
+def _render_handles_editor(settings: Settings) -> None:
+    st.markdown("## Handles")
+    st.caption("Add or remove accounts monitored by the manual Fetch action.")
+    editor_key = "sidebar_handles_editor"
+    widget_key = editor_key + "_widget"
+    if editor_key not in st.session_state:
+        st.session_state[editor_key] = load_accounts(settings.config_dir)
+
+    edited = st.data_editor(
+        st.session_state[editor_key],
+        key=widget_key,
+        num_rows="dynamic",
+        use_container_width=True,
+        hide_index=True,
+        column_config={
+            "handle": st.column_config.TextColumn(
+                "X handle", required=True, help="1–15 letters, numbers, or underscores"
+            ),
+        },
+    )
+    invalid = [
+        row for row in edited
+        if not _valid_handle(str(row.get("handle") or ""))
+    ]
+    if invalid:
+        st.warning(f"{len(invalid)} invalid row(s) will be skipped on save.")
+
+    def revert() -> None:
+        st.session_state[editor_key] = load_accounts(settings.config_dir)
+        st.session_state.pop(widget_key, None)
+
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("Save", key="sidebar_handles_save", use_container_width=True):
+            rows = write_accounts(
+                settings.config_dir,
+                [(row.get("handle") or "") for row in edited],
+            )
+            st.session_state[editor_key] = rows
+            st.toast(f"Saved {len(rows)} handle(s)", icon="✅")
+    with c2:
+        st.button(
+            "Revert",
+            key="sidebar_handles_revert",
+            use_container_width=True,
+            on_click=revert,
+        )
+
+
+def _valid_handle(value: str) -> bool:
+    import re
+
+    return bool(re.fullmatch(r"@?[A-Za-z0-9_]{1,15}", value.strip()))
 
 
 def _render_projects_editor(settings: Settings, db: Database) -> None:

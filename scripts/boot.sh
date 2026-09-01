@@ -28,9 +28,9 @@ if [[ ! -f .env ]]; then
     exit 0
 fi
 
-# Phase 0 verification
-echo "==> Running scripts/verify_setup.py"
-.venv/bin/python scripts/verify_setup.py
+# Local user configuration
+[[ -f config/accounts.yaml ]] || cp config/accounts.example.yaml config/accounts.yaml
+[[ -f data/projects.csv ]] || cp data/projects.example.csv data/projects.csv
 
 # OAuth setup, if needed
 if [[ ! -f data/oauth_tokens.json ]]; then
@@ -43,6 +43,7 @@ echo ""
 echo "==> Launching Streamlit on http://localhost:8501"
 echo "    Press Ctrl-C to stop."
 echo ""
+export STREAMLIT_GLOBAL_DEVELOPMENT_MODE=false
 exec .venv/bin/streamlit run src/x_auto/app.py \
     --server.headless true \
     --server.port 8501 \

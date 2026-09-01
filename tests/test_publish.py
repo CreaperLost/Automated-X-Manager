@@ -21,7 +21,7 @@ from x_auto.store.models import Draft
 from x_auto.store.repos import Database
 from x_auto.x.auth import TokenBundle, TokenManager, TokenStore
 from x_auto.x.client import API_BASE, XClient
-from x_auto.x.publish import publish_draft
+from x_auto.x.publish import PublishValidationError, publish_draft
 
 
 def _seed_tokens(settings: Settings, tmp_path: Path) -> TokenStore:
@@ -65,6 +65,33 @@ def _make_draft(db: Database, **overrides) -> Draft:
 
 
 class TestPublishDraft:
+    def test_legacy_third_party_quote_is_removed_before_write(
+        self, configured_settings, x_client, tmp_db: Database
+    ):
+        draft = _make_draft(
+            tmp_db, body="inspired take", link_url=None,
+            quote_tweet_id="third-party-quote",
+        )
+        with respx.mock(base_url=API_BASE, assert_all_called=False) as mock:
+            route = mock.post("/tweets").mock(
+                return_value=httpx.Response(200, json={"data": {"id": "safe-1"}})
+            )
+            asyncio.run(publish_draft(configured_settings, tmp_db, x_client, draft))
+        assert "quote_tweet_id" not in route.calls[0].request.content.decode()
+        assert tmp_db.get_draft(draft.id).quote_tweet_id is None
+
+    def test_invalid_body_is_blocked_before_any_x_write(
+        self, configured_settings, x_client, tmp_db: Database
+    ):
+        draft = _make_draft(tmp_db, body="visit https://inline.example", link_url=None)
+        with respx.mock(base_url=API_BASE, assert_all_called=False) as mock:
+            route = mock.post("/tweets")
+            with pytest.raises(PublishValidationError):
+                asyncio.run(
+                    publish_draft(configured_settings, tmp_db, x_client, draft)
+                )
+        assert route.call_count == 0
+
     def test_post_now_flips_status_and_writes_log(
         self, configured_settings, x_client, tmp_db: Database
     ):

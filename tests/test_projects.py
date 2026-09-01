@@ -88,11 +88,11 @@ class TestLoadCsv:
 
 class TestSyncProjects:
     def test_sync_into_db_roundtrip(self, configured_settings, tmp_db: Database):
-        real_csv = configured_settings.repo_root / "data" / "projects.csv"
-        if real_csv.exists():
-            import shutil
-            configured_settings.data_dir.mkdir(parents=True, exist_ok=True)
-            shutil.copy(real_csv, configured_settings.data_dir / "projects.csv")
+        import shutil
+
+        example_csv = configured_settings.repo_root / "data" / "projects.example.csv"
+        configured_settings.data_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy(example_csv, configured_settings.data_dir / "projects.csv")
         n = sync_projects(configured_settings, tmp_db)
         assert n >= 1
         from x_auto.ai.projects import list_projects

@@ -5,7 +5,7 @@
 #   2. Create .venv if missing
 #   3. Upgrade pip + install requirements
 #   4. Ensure .env exists (copy from .env.example if not)
-#   5. Run scripts/verify_setup.py (Phase 0 X API Skills)
+#   5. Create local handle/project files from public examples if missing
 #   6. Run scripts/auth_setup.py if no OAuth tokens are saved yet
 #      (interactive: opens browser, captures the redirect)
 #   7. Start Streamlit (foreground, server.port 8501)
@@ -49,12 +49,14 @@ else {
     Write-Host '==> .env present'
 }
 
-# 5. Phase 0 verification
-Write-Host '==> Running scripts/verify_setup.py'
-& $Py scripts/verify_setup.py
-if ($LASTEXITCODE -ne 0) {
-    Write-Error 'verify_setup.py failed. Run it manually to see what is missing.'
-    exit $LASTEXITCODE
+# 5. Local user configuration
+$Accounts = Join-Path $RepoRoot 'config\accounts.yaml'
+if (-not (Test-Path $Accounts)) {
+    Copy-Item (Join-Path $RepoRoot 'config\accounts.example.yaml') $Accounts
+}
+$Projects = Join-Path $RepoRoot 'data\projects.csv'
+if (-not (Test-Path $Projects)) {
+    Copy-Item (Join-Path $RepoRoot 'data\projects.example.csv') $Projects
 }
 
 # 6. OAuth setup, if needed
@@ -76,6 +78,7 @@ Write-Host ''
 Write-Host '==> Launching Streamlit on http://localhost:8501'
 Write-Host '    Press Ctrl-C to stop.'
 Write-Host ''
+$env:STREAMLIT_GLOBAL_DEVELOPMENT_MODE = 'false'
 & $Py -m streamlit run src\x_auto\app.py `
     --server.headless true `
     --server.port 8501 `

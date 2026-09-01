@@ -3,7 +3,7 @@
 These tests cover the DB-level contract that backs the v4 Create/Publish
 tabs: Generate persists, Save updates the same row, Discard deletes,
 Promote flips status. We exercise the helper functions directly
-because the Streamlit UI layer is smoke-tested in scripts/diag.py.
+because the Streamlit UI layer is covered by the AppTest layout tests.
 """
 from __future__ import annotations
 

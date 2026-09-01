@@ -170,6 +170,7 @@ def validate_post_body(
     text: str,
     *,
     role: str = "main",
+    allow_url: bool = False,
 ) -> list[PostValidationError]:
     """Pre-flight checks for a post body before we send it to X.
 
@@ -178,8 +179,9 @@ def validate_post_body(
 
     * Empty body
     * Over X_MAX_POST_CHARS (280)
-    * Contains a URL (X charges $0.200 vs $0.015 for plain — the
-      app's whole point is to put the URL in the reply instead)
+    * Contains a URL when ``allow_url`` is false (X charges $0.200 vs
+      $0.015 for plain — the app's whole point is to put the URL in the
+      reply instead)
     * More than one cashtag (X returns 403 and rejects the post)
     """
     errs: list[PostValidationError] = []
@@ -200,7 +202,7 @@ def validate_post_body(
             "Cut filler words; the AI prompt aims for 220–260.",
         ))
 
-    if contains_url(text):
+    if contains_url(text) and not allow_url:
         errs.append(PostValidationError(
             "url_in_body",
             f"{role.capitalize()} tweet contains a URL — would cost "

@@ -1,0 +1,12 @@
+[global]
+developmentMode = false
+
+[server]
+headless = true
+port = 8501
+
+[client]
+toolbarMode = "minimal"
+
+[browser]
+gatherUsageStats = false
