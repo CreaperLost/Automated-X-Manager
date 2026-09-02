@@ -34,14 +34,14 @@ env/
 *credentials*.json
 
 # Runtime state
-config/accounts.yaml
-data/projects.csv
 data/*.db
 data/*.db-*
 data/*.sqlite
 data/*.sqlite-*
 data/oauth_tokens.json
-data/media_cache/
+data/media_cache/**/*
+!data/media_cache/**/
+!data/media_cache/**/.gitkeep
 data/scheduler.lock
 data/x-automation.pid
 *.log

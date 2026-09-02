@@ -96,13 +96,16 @@ Use the sidebar inside the app:
   URL.
 - **Model** — select the available MiniMax model.
 
-Personal handle and project files are intentionally excluded from Git:
+Handle and project configuration is tracked in Git:
 
 - `config/accounts.yaml`
 - `data/projects.csv`
 
-Public examples are provided as `config/accounts.example.yaml` and
-`data/projects.example.csv`.
+Example files are also provided as `config/accounts.example.yaml` and
+`data/projects.example.csv` for reference.
+
+The project folders under `data/media_cache/` are preserved with `.gitkeep`
+files, while their generated or downloaded contents remain excluded from Git.
 
 ## Daily use
 
