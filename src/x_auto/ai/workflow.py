@@ -38,11 +38,19 @@ candidates instead of posting the LLM's choice").
 """
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 from ..store.models import Draft, WritingMode
-from ..utils.text import extract_first_url
+from ..store.performance import load_winners
+from ..utils.media_catalog import (
+    catalog_path_for_data_dir,
+    list_project_media_with_descriptions,
+)
+from ..utils.media_matching import match_best_media
+from ..utils.text import clean_humanized_text, extract_first_url, format_cta_reply
 from .client import AIClient
 from .prompts import (
     DRAFT_SYSTEM,
@@ -50,6 +58,8 @@ from .prompts import (
     ORIGINAL_TAKE_SYSTEM,
     build_match_user,
     build_rephrase_user,
+    get_agent_original_take_system,
+    get_agent_rephrase_system,
 )
 
 # Conservative character caps. The X free plan caps tweets at 280.
@@ -183,7 +193,7 @@ class DraftWorkflow:
         # Defensive: enforce the no-URL-in-main rule even if the LLM
         # leaks one in. This is the cost invariant; we cannot rely on
         # the prompt alone.
-        state.main = _strip_url(state.main)
+        state.main = clean_humanized_text(_strip_url(state.main))
         if len(state.main) > MAIN_HARD_CAP:
             state.main = state.main[:MAIN_HARD_CAP].rsplit(" ", 1)[0]
 
@@ -211,9 +221,6 @@ class DraftWorkflow:
         state.cta_text = (result.get("cta_text") or "").strip()
         state.match_reasoning = (result.get("reasoning") or "").strip()
 
-        if len(state.cta_text) > CTA_HARD_CAP:
-            state.cta_text = state.cta_text[:CTA_HARD_CAP].rsplit(" ", 1)[0]
-
     # ---- step 4: fill (deterministic) ------------------------------------
 
     def _step_fill(self, state: _WorkflowState) -> None:
@@ -231,14 +238,7 @@ class DraftWorkflow:
 
         state.project_name = project["name"]
         state.project_url = project["url"]
-
-        # Guarantee: the CTA must contain the chosen project's URL.
-        # If the AI's CTA doesn't include it, append it.
-        if state.project_url and state.project_url not in state.cta_text:
-            cta = state.cta_text.rstrip()
-            if cta and not cta.endswith((".", "!", "?")):
-                cta += "."
-            state.cta_text = (cta + " " + state.project_url).strip()
+        state.cta_text = format_cta_reply(state.cta_text, state.project_url)
 
     # ---- assemble result -------------------------------------------------
 
@@ -291,4 +291,168 @@ def _strip_url(text: str) -> str:
     if not contains_url(text):
         return text
     url = extract_first_url(text) or ""
-    return text.replace(url, "").strip()
+    cleaned = text.replace(url, "")
+    cleaned = re.sub(r"[ \t]+", " ", cleaned)
+    return cleaned.strip()
+
+
+# ---- Agent Workflow (A/B Drafts + Tone Enforcement) ------------------------
+
+@dataclass
+class AgentWorkflowResult:
+    """Output of AgentDraftWorkflow.run()."""
+
+    source_tweet_id: str | None
+    source_author: str
+    source_text: str
+    source_url: str | None
+    topic: str
+    project_name: str
+    project_url: str
+    cta_text: str
+    match_reasoning: str
+    # Option A (Rephrase)
+    option_a_main: str
+    option_a_reasoning: str
+    # Option B (Original Take)
+    option_b_main: str
+    option_b_reasoning: str
+    niche: str = "crypto"
+    recommended_media_path: str | None = None
+    recommended_media_name: str | None = None
+
+
+class AgentDraftWorkflow:
+    """Autonomous agent draft workflow generating Option A & Option B with niche tone."""
+
+    def __init__(self, ai: AIClient, niche: str = "crypto", data_dir: Path | None = None) -> None:
+        self.ai = ai
+        self.niche = niche.strip().lower()
+        self.data_dir = data_dir
+
+    def run(
+        self,
+        *,
+        source_text: str,
+        source_author: str,
+        source_tweet_id: str | None,
+        projects: list[dict[str, Any]],
+        extra_instructions: str = "",
+    ) -> AgentWorkflowResult:
+        # 1. Understand: extract source URL hint
+        source_url = extract_first_url(source_text) or None
+
+        # Load winning post exemplars for self-improving few-shot prompting
+        winning_examples: list[str] = []
+        if self.data_dir:
+            winners = load_winners(self.data_dir, limit=3)
+            winning_examples = [w["body"] for w in winners if w.get("body")]
+
+        # 2. Option A: Rephrase with niche tone
+        user_msg_a = build_rephrase_user(
+            source_tweet_text=source_text,
+            source_tweet_author=source_author,
+            source_url=source_url,
+            extra_instructions=extra_instructions,
+            winning_examples=winning_examples or None,
+        )
+        sys_a = get_agent_rephrase_system(self.niche)
+        res_a = self.ai.generate_draft(
+            system=sys_a,
+            user=user_msg_a,
+            required_keys=REPHRASE_KEYS,
+        )
+        opt_a_main = clean_humanized_text(
+            _strip_url((res_a.get("main") or "").strip()),
+            niche=self.niche,
+        )
+        if len(opt_a_main) > MAIN_HARD_CAP:
+            opt_a_main = opt_a_main[:MAIN_HARD_CAP].rsplit(" ", 1)[0]
+        topic = (res_a.get("topic") or "").strip()
+        opt_a_reasoning = (res_a.get("reasoning") or "").strip()
+
+        # 3. Option B: Original take with niche tone
+        user_msg_b = build_rephrase_user(
+            source_tweet_text=source_text,
+            source_tweet_author=source_author,
+            source_url=source_url,
+            extra_instructions=extra_instructions,
+            winning_examples=winning_examples or None,
+        )
+        sys_b = get_agent_original_take_system(self.niche)
+        res_b = self.ai.generate_draft(
+            system=sys_b,
+            user=user_msg_b,
+            required_keys=REPHRASE_KEYS,
+        )
+        opt_b_main = clean_humanized_text(
+            _strip_url((res_b.get("main") or "").strip()),
+            niche=self.niche,
+        )
+        if len(opt_b_main) > MAIN_HARD_CAP:
+            opt_b_main = opt_b_main[:MAIN_HARD_CAP].rsplit(" ", 1)[0]
+        opt_b_reasoning = (res_b.get("reasoning") or "").strip()
+
+        # 4. Match activation project and create CTA reply
+        project_name = ""
+        project_url = ""
+        cta_text = ""
+        match_reasoning = ""
+        if projects:
+            match_user = build_match_user(
+                source_tweet_text=source_text,
+                source_tweet_author=source_author,
+                source_url=source_url,
+                topic=topic or "general",
+                projects=projects,
+            )
+            match_res = self.ai.generate_draft(
+                system=MATCH_SYSTEM,
+                user=match_user,
+                required_keys=MATCH_KEYS,
+            )
+            raw_proj_name = (match_res.get("project_name") or "").strip()
+            raw_cta = (match_res.get("cta_text") or "").strip()
+            match_reasoning = (match_res.get("reasoning") or "").strip()
+
+            proj = _find_project(raw_proj_name, projects)
+            if proj is None:
+                proj = projects[0]
+            project_name = proj["name"]
+            project_url = proj["url"]
+            cta_text = format_cta_reply(raw_cta, project_url, niche=self.niche)
+
+        # 5. Semantic Media Auto-Matching: Match topic against media catalog
+        recommended_media_path: str | None = None
+        recommended_media_name: str | None = None
+        if self.data_dir and project_name:
+            catalog_path = catalog_path_for_data_dir(self.data_dir)
+            media_files = list_project_media_with_descriptions(
+                self.data_dir / "media_cache",
+                catalog_path,
+                project_name,
+            )
+            matched = match_best_media(media_files, text=source_text, topic=topic)
+            if matched:
+                recommended_media_name = matched.get("filename")
+                recommended_media_path = matched.get("path")
+
+        return AgentWorkflowResult(
+            source_tweet_id=source_tweet_id,
+            source_author=source_author,
+            source_text=source_text,
+            source_url=source_url,
+            topic=topic,
+            project_name=project_name,
+            project_url=project_url,
+            cta_text=cta_text,
+            match_reasoning=match_reasoning,
+            option_a_main=opt_a_main,
+            option_a_reasoning=opt_a_reasoning,
+            option_b_main=opt_b_main,
+            option_b_reasoning=opt_b_reasoning,
+            niche=self.niche,
+            recommended_media_path=recommended_media_path,
+            recommended_media_name=recommended_media_name,
+        )
+

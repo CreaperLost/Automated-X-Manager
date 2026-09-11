@@ -23,12 +23,37 @@ MODEL_OPTIONS = [
 ]
 
 
+NICHE_OPTIONS = ["Crypto", "AI"]
+NICHE_DISPLAY_NAMES = {
+    "crypto": "Crypto",
+    "ai": "AI",
+}
+
+
 def render_sidebar(
     settings: Settings,
     db: Database,
 ) -> None:
     with st.sidebar:
         st.markdown("### X-Automation")
+        current_niche_key = getattr(settings, "niche", "crypto").lower()
+        current_niche = NICHE_DISPLAY_NAMES.get(current_niche_key, "Crypto")
+
+        if st.session_state.get("sidebar_niche_switch") not in NICHE_OPTIONS:
+            st.session_state["sidebar_niche_switch"] = current_niche
+
+        chosen_niche = st.segmented_control(
+            "Niche",
+            NICHE_OPTIONS,
+            default=current_niche,
+            key="sidebar_niche_switch",
+            help="Switch between Crypto and AI settings, creators, and activations.",
+        ) or current_niche
+        if chosen_niche.lower() != current_niche_key:
+            st.session_state["active_niche"] = chosen_niche
+            st.rerun()
+
+        st.markdown("---")
         _render_model_picker(settings)
         st.markdown("---")
         _render_handles_editor(settings)
@@ -45,7 +70,7 @@ def _render_model_picker(settings: Settings) -> None:
         "Model",
         MODEL_OPTIONS,
         index=MODEL_OPTIONS.index(current),
-        key="sidebar_model",
+        key=f"sidebar_model_{settings.niche}",
         label_visibility="collapsed",
         help=(
             "MiniMax-M3: 1M context, multimodal. "
@@ -53,10 +78,7 @@ def _render_model_picker(settings: Settings) -> None:
             "M2.7-highspeed: faster, same price."
         ),
     )
-    # Auto-save on change. ``on_change`` fires whenever the user picks a
-    # different value, so no Save button is needed. We pass the chosen
-    # value via a closure (Streamlit's on_change signature takes no
-    # arguments from the caller — it has to read from session state).
+    # Auto-save on change.
     if chosen != current:
         try:
             _write_model_choice(settings, chosen)
@@ -67,15 +89,16 @@ def _render_model_picker(settings: Settings) -> None:
 
 def _write_model_choice(settings: Settings, model_id: str) -> None:
     path = settings.config_dir / "settings.yaml"
-    if not path.exists():
-        return
-    data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    data = {}
+    if path.exists():
+        data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
     if not isinstance(data, dict):
-        return
+        data = {}
     mm = data.setdefault("minimax", {})
     if not isinstance(mm, dict):
-        return
+        mm = data["minimax"] = {}
     mm["model_id"] = model_id
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(
         yaml.safe_dump(data, sort_keys=False, allow_unicode=True),
         encoding="utf-8",
@@ -83,9 +106,10 @@ def _write_model_choice(settings: Settings, model_id: str) -> None:
 
 
 def _render_handles_editor(settings: Settings) -> None:
-    st.markdown("## Handles")
-    st.caption("Add or remove accounts monitored by the manual Fetch action.")
-    editor_key = "sidebar_handles_editor"
+    niche_title = settings.niche.title()
+    st.markdown(f"## Creators ({settings.niche.upper()})")
+    st.caption(f"Add or remove {niche_title} creator accounts monitored by manual Fetch.")
+    editor_key = f"sidebar_creators_{settings.niche}"
     widget_key = editor_key + "_widget"
     if editor_key not in st.session_state:
         st.session_state[editor_key] = load_accounts(settings.config_dir)
@@ -98,7 +122,7 @@ def _render_handles_editor(settings: Settings) -> None:
         hide_index=True,
         column_config={
             "handle": st.column_config.TextColumn(
-                "X handle", required=True, help="1–15 letters, numbers, or underscores"
+                "Creator handle", required=True, help="1–15 letters, numbers, or underscores"
             ),
         },
     )
@@ -115,17 +139,17 @@ def _render_handles_editor(settings: Settings) -> None:
 
     c1, c2 = st.columns(2)
     with c1:
-        if st.button("Save", key="sidebar_handles_save", use_container_width=True):
+        if st.button("Save", key=f"sidebar_creators_save_{settings.niche}", use_container_width=True):
             rows = write_accounts(
                 settings.config_dir,
                 [(row.get("handle") or "") for row in edited],
             )
             st.session_state[editor_key] = rows
-            st.toast(f"Saved {len(rows)} handle(s)", icon="✅")
+            st.toast(f"Saved {len(rows)} creator(s)", icon="✅")
     with c2:
         st.button(
             "Revert",
-            key="sidebar_handles_revert",
+            key=f"sidebar_creators_revert_{settings.niche}",
             use_container_width=True,
             on_click=revert,
         )
@@ -138,14 +162,15 @@ def _valid_handle(value: str) -> bool:
 
 
 def _render_projects_editor(settings: Settings, db: Database) -> None:
-    st.markdown("## Projects")
+    niche_title = settings.niche.title()
+    st.markdown(f"## Activations ({settings.niche.upper()})")
     st.caption(
-        "The Create tab auto-picks the best project from this list for "
+        f"The Create tab auto-picks the best {niche_title} activation from this list for "
         "each generated reply. Description / tags columns are stored in "
         "the DB but not yet used by the AI."
     )
 
-    editor_key = "sidebar_projects_editor"
+    editor_key = f"sidebar_projects_{settings.niche}"
     if editor_key not in st.session_state:
         st.session_state[editor_key] = _projects_to_rows(
             load_csv(csv_path(settings))
@@ -155,19 +180,18 @@ def _render_projects_editor(settings: Settings, db: Database) -> None:
     # even when the table scrolls off-screen.
     c1, c2 = st.columns(2)
     with c1:
-        if st.button("Save", key="sidebar_csv_save", use_container_width=True):
+        if st.button("Save", key=f"sidebar_csv_save_{settings.niche}", use_container_width=True):
             _save_projects(settings, db, editor_key)
     with c2:
-        if st.button("Revert", key="sidebar_csv_revert", use_container_width=True):
+        if st.button("Revert", key=f"sidebar_csv_revert_{settings.niche}", use_container_width=True):
             st.session_state[editor_key] = _projects_to_rows(
                 load_csv(csv_path(settings))
             )
             st.rerun()
 
     st.caption(
-        "Rows: project name + the URL the AI should insert as a CTA "
-        "(`http://` or `https://`). Save commits the table to "
-        "`data/projects.csv`; Revert reloads the last saved version."
+        "Rows: activation name + the URL the AI should insert as a CTA "
+        "(`http://` or `https://`). Save commits the table to disk."
     )
     edited = st.data_editor(
         st.session_state[editor_key],
@@ -196,7 +220,7 @@ def _save_projects(settings: Settings, db: Database, editor_key: str) -> None:
         (project["name"] for project in projects),
     )
     st.session_state[editor_key] = _projects_to_rows(projects)
-    st.toast(f"Saved {len(projects)} project(s)", icon="✅")
+    st.toast(f"Saved {len(projects)} activation(s)", icon="✅")
 
 
 def _projects_to_rows(projects: list[dict]) -> list[dict]:

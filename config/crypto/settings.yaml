@@ -1,0 +1,18 @@
+minimax:
+  base_url: https://api.minimax.io/v1
+  model_id: MiniMax-M3
+  temperature: 0.7
+  # 2048 leaves headroom for MiniMax-M3's <think>…</think> block plus
+  # the actual JSON output. 400 was too low and the model exhausted
+  # its budget inside the think block, returning no JSON.
+  max_tokens: 2048
+x:
+  # Fetch the five most recent posts per configured account.
+  recent_max_results: 5
+  exclude:
+  - replies
+  - retweets
+  rate_limit_buffer_seconds: 5
+ui:
+  page_title: X-Automation · Crypto
+  cost_warning_threshold_usd: 1.0

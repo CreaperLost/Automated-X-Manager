@@ -117,7 +117,12 @@ def sync_projects(settings: Settings, db: Database) -> int:
 
     Returns the count written. Safe to call at app startup; idempotent.
     """
-    projects = load_csv(csv_path(settings))
+    path = csv_path(settings)
+    if not path.exists() and hasattr(settings, "repo_root") and settings.repo_root:
+        fallback = settings.repo_root / "data" / "projects.csv"
+        if fallback.exists():
+            path = fallback
+    projects = load_csv(path)
     db.replace_projects(projects)
     return len(projects)
 
