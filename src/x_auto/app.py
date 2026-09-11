@@ -37,8 +37,8 @@ from x_auto.x.client import XClient
 
 
 @st.cache_resource
-def _bootstrap() -> tuple:
-    settings = get_settings()
+def _bootstrap(niche: str = "crypto") -> tuple:
+    settings = get_settings(niche=niche)
     settings.data_dir.mkdir(parents=True, exist_ok=True)
     db = Database(settings.data_dir / "state.db")
     sync_projects(settings, db)
@@ -73,14 +73,18 @@ def _inject_active_tab_css() -> None:
 
 
 def main() -> None:
-    settings, db, x_client, ai, _token_manager = _bootstrap()
+    raw_niche = str(st.session_state.get("active_niche", "Crypto")).strip().lower()
+    st.session_state["active_niche"] = "AI" if raw_niche == "ai" else "Crypto"
+
+    active_niche = raw_niche if raw_niche in ("crypto", "ai") else "crypto"
+    settings, db, x_client, ai, _token_manager = _bootstrap(active_niche)
     st.set_page_config(
         page_title=settings.ui.page_title,
         layout="wide",
         initial_sidebar_state="collapsed",
     )
 
-    # Sidebar: Model picker + Projects editor (no expander wrapper).
+    # Sidebar: Niche switcher + Model picker + Creators editor + Activations editor.
     render_sidebar(settings, db)
 
     # Active-tab color override (once per app run; Streamlit reruns
@@ -100,7 +104,7 @@ def main() -> None:
     ) or "Sources"
 
     if view == "Sources":
-        render_sources(settings, db, x_client)
+        render_sources(settings, db, x_client, ai=ai)
     elif view == "Create":
         render_create(settings, db, ai, x_client=x_client)
     else:

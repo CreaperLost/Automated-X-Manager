@@ -17,3 +17,8 @@ command = "bash scripts/start.sh"
 name = "Stop"
 icon = "tool"
 command = "bash scripts/stop.sh"
+
+[[actions]]
+name = "Setup Access / Key"
+icon = "tool"
+command = ".venv/bin/python scripts/auth_setup.py"

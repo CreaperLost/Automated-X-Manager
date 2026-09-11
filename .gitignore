@@ -36,14 +36,24 @@ env/
 # Runtime state
 data/*.db
 data/*.db-*
+data/**/*.db
+data/**/*.db-*
 data/*.sqlite
 data/*.sqlite-*
+data/**/*.sqlite
+data/**/*.sqlite-*
 data/oauth_tokens.json
+data/**/oauth_tokens.json
 data/media_cache/**/*
 !data/media_cache/**/
 !data/media_cache/**/.gitkeep
+data/**/media_cache/**/*
+!data/**/media_cache/**/
+!data/**/media_cache/**/.gitkeep
 data/scheduler.lock
+data/**/scheduler.lock
 data/x-automation.pid
+data/**/x-automation.pid
 *.log
 .tmp_*
 
