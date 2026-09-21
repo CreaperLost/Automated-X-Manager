@@ -72,8 +72,11 @@ if [[ ! -f .env ]]; then
 fi
 
 # Local user configuration
-[[ -f config/accounts.yaml ]] || cp config/accounts.example.yaml config/accounts.yaml
-[[ -f data/projects.csv ]] || cp data/projects.example.csv data/projects.csv
+mkdir -p config/crypto config/ai data/crypto data/ai
+[[ -f config/crypto/creators.yaml ]] || cp config/accounts.example.yaml config/crypto/creators.yaml
+[[ -f config/ai/creators.yaml ]] || cp config/accounts.example.yaml config/ai/creators.yaml
+[[ -f data/crypto/projects.csv ]] || cp data/projects.example.csv data/crypto/projects.csv
+[[ -f data/ai/projects.csv ]] || cp data/projects.example.csv data/ai/projects.csv
 
 # OAuth setup, if needed
 if [[ ! -f data/oauth_tokens.json ]]; then

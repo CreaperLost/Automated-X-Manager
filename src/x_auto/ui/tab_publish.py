@@ -17,6 +17,7 @@ tab. The compact mode is used here for the 1/3-width Draft cards.
 """
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime
 
 import streamlit as st
@@ -26,6 +27,7 @@ from ..ai.projects import list_projects
 from ..ai.workflow import DraftWorkflow
 from ..config import Settings
 from ..store.models import Draft
+from ..store.performance import is_high_performer, save_winner
 from ..store.repos import Database
 from ..utils.text import contains_url, validate_post_body
 from ..x.client import AuthExpiredError, RateLimitedError, XApiError, XClient
@@ -49,7 +51,7 @@ def render(
     x_client: XClient,
     ai: AIClient,
 ) -> None:
-    st.header("Queue")
+    st.header(f"Queue · {settings.niche.upper()}")
     # No global caption — each section has its own one-liner below.
 
     # Persistent post-result banner. ``st.success`` / ``st.error`` are
@@ -63,7 +65,7 @@ def render(
             st.success(last["message"])
         else:
             st.error(last["message"])
-        if st.button("Dismiss", key="publish_dismiss_last_post", type="secondary"):
+        if st.button("Dismiss", key=f"publish_dismiss_last_post_{settings.niche}", type="secondary"):
             st.session_state.pop(_KEY_LAST_POST, None)
             st.rerun()
 
@@ -380,8 +382,27 @@ def _render_published_card_compact(
         if original.link_url:
             st.caption(f"↪ reply: `{_truncate(original.link_url, 40)}`")
 
-        # Two action buttons: Repost (inline) + Paraphrase (popover).
-        col_repost, col_paraphrase = st.columns(2)
+        # Performance metrics (if checked)
+        cached_m = st.session_state.get(f"metrics_{original.id}")
+        if cached_m:
+            likes = cached_m.get("like_count", 0)
+            rts = cached_m.get("retweet_count", 0)
+            reps = cached_m.get("reply_count", 0)
+            impr = cached_m.get("impression_count", 0)
+            stats_line = f"❤ {likes}  ·  🔁 {rts}  ·  💬 {reps}"
+            if impr:
+                stats_line += f"  ·  👀 {impr}"
+            if is_high_performer(cached_m):
+                stats_line += "  ·  🏆 **Winner**"
+            st.caption(stats_line)
+
+        # Action buttons: Repost, Stats (if posted to X), and Paraphrase
+        if original.x_tweet_id:
+            col_repost, col_stats, col_paraphrase = st.columns([1, 1.1, 1])
+        else:
+            col_repost, col_paraphrase = st.columns(2)
+            col_stats = None
+
         with col_repost:
             if st.button(
                 "Repost",
@@ -390,6 +411,26 @@ def _render_published_card_compact(
             ):
                 _do_repost(settings, db, x_client, original)
                 st.rerun()
+
+        if col_stats:
+            with col_stats:
+                if st.button(
+                    "🔄 Stats",
+                    key=f"stats_{original.id}",
+                    use_container_width=True,
+                    help="Query post metrics from X ($0.005 read cost). High performers are saved as AI exemplars.",
+                ):
+                    with st.spinner("Checking metrics…"):
+                        try:
+                            m = asyncio.run(x_client.get_tweet_metrics(original.x_tweet_id))
+                        except Exception as exc:
+                            st.error(f"Failed: {exc}")
+                        else:
+                            st.session_state[f"metrics_{original.id}"] = m
+                            if is_high_performer(m):
+                                save_winner(settings.data_dir, original.id, original.body, m, original.link_url or "")
+                            st.rerun()
+
         with col_paraphrase:
             can_paraphrase = bool(original.source_tweet_id) and bool(original.link_url)
             with st.popover(

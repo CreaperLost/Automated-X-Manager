@@ -12,8 +12,16 @@ script = "bash scripts/stop.sh"
 name = "Run"
 icon = "run"
 command = "& 'C:\\Program Files\\Git\\bin\\bash.exe' scripts/start.sh"
+# command = "bash scripts/start.sh"
+
 
 [[actions]]
 name = "Stop"
 icon = "tool"
 command = "& 'C:\\Program Files\\Git\\bin\\bash.exe' bash scripts/stop.sh"
+# command = "bash scripts/stop.sh"
+
+[[actions]]
+name = "Setup Access / Key"
+icon = "tool"
+command = ".venv/bin/python scripts/auth_setup.py"

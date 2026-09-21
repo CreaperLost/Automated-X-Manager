@@ -94,11 +94,14 @@ class CreateState:
 _STATE_KEY = "create_state"
 
 
-def _state() -> CreateState:
+def _state(niche: str | None = None) -> CreateState:
     """Return the namespaced CreateState, creating it on first access."""
-    if _STATE_KEY not in st.session_state:
-        st.session_state[_STATE_KEY] = CreateState()
-    return st.session_state[_STATE_KEY]
+    if niche is None:
+        niche = str(st.session_state.get("active_niche", "Crypto")).lower()
+    state_key = f"create_state_{niche}"
+    if state_key not in st.session_state:
+        st.session_state[state_key] = CreateState()
+    return st.session_state[state_key]
 
 
 # ---- render -----------------------------------------------------------------
@@ -110,13 +113,15 @@ def render(
     *,
     x_client=None,
 ) -> None:
-    st.header("Create")
+    niche = getattr(settings, "niche", "crypto")
+    state = _state(niche)
+    st.header(f"Create · {niche.upper()}")
     st.caption(
-        "Pick a selected source, choose a writing mode and optional attachment, "
-        "then **Generate draft**. The AI writes one draft "
-        "in your voice and auto-picks the best project from your CSV for "
-        "the reply (a separate post). The editor shows the pick so you can "
-        "override it."
+        f"Pick a selected source, choose a writing mode and optional attachment, "
+        f"then **Generate draft**. The AI writes one draft "
+        f"in your voice and auto-picks the best {niche.title()} activation from your CSV for "
+        f"the reply (a separate post). The editor shows the pick so you can "
+        f"override it."
     )
 
     selected = db.list_tweets(status="selected", limit=200)
@@ -129,12 +134,12 @@ def render(
     edit_id = st.query_params.get("edit_draft")
     if edit_id and edit_id.lstrip("-").isdigit():
         opened = db.get_draft(int(edit_id))
-        _state().editing_draft_id = int(edit_id)
+        state.editing_draft_id = int(edit_id)
         if opened and opened.source_tweet_id:
             db.set_tweet_status(opened.source_tweet_id, "selected")
-            st.session_state["create_selected_source_id"] = opened.source_tweet_id
+            st.session_state[f"create_selected_source_id_{niche}"] = opened.source_tweet_id
         if opened:
-            st.session_state["create_writing_mode"] = (
+            st.session_state[f"create_writing_mode_{niche}"] = (
                 "Original take" if opened.writing_mode == "original_take" else "Rephrase"
             )
         st.query_params.pop("edit_draft", None)
@@ -150,8 +155,8 @@ def render(
 
     if not projects:
         st.error(
-            "No projects in `data/projects.csv` — add at least one in the "
-            "sidebar's **Projects** section. Generate needs a project list to "
+            f"No activations in `data/{niche}/projects.csv` — add at least one in the "
+            f"sidebar's **Activations** section. Generate needs an activation list to "
             "pick from."
         )
         _render_saved_drafts(db, settings, kind="resumable")
@@ -159,10 +164,10 @@ def render(
 
     # ---- 1. Form: source / image / extras (single column) -----------------
     st.markdown("**Source tweet**")
-    requested_id = st.session_state.pop("create_selected_source_id", None)
+    requested_id = st.session_state.pop(f"create_selected_source_id_{niche}", None) or st.session_state.pop("create_selected_source_id", None)
     source_ids = [t.id for t in selected]
     if requested_id in source_ids:
-        st.session_state["create_source_id"] = requested_id
+        st.session_state[f"create_source_id_{niche}"] = requested_id
     by_id = {t.id: t for t in selected}
     source_id = st.selectbox(
         "Source tweet",
@@ -171,10 +176,10 @@ def render(
             lambda tid: f"@{by_id[tid].account_handle}: {by_id[tid].text[:80]}"
             f"{'…' if len(by_id[tid].text) > 80 else ''}"
         ),
-        key="create_source_id",
+        key=f"create_source_id_{niche}",
         label_visibility="collapsed",
         help=(
-            f"{len(projects)} project(s) in your CSV — the AI will auto-pick "
+            f"{len(projects)} activation(s) in your CSV — the AI will auto-pick "
             "the best fit for this source. The source's own URL, if any, is "
             "read as a topic hint (it is not copied into your tweet)."
         ),
@@ -185,7 +190,7 @@ def render(
         "Writing mode",
         ["Rephrase", "Original take"],
         horizontal=True,
-        key="create_writing_mode",
+        key=f"create_writing_mode_{niche}",
         help="Rephrase preserves the core idea. Original take develops a new angle.",
     )
     writing_mode = "original_take" if writing_label == "Original take" else "rephrase"
@@ -198,7 +203,7 @@ def render(
         "Attachment",
         attachment_options,
         horizontal=True,
-        key=f"create_attachment_{source.id}",
+        key=f"create_attachment_{niche}_{source.id}",
     )
     upload = None
     if attachment == "Use source image" and source.source_image_url:
@@ -210,7 +215,7 @@ def render(
                 "Upload type",
                 ["Image", "Video"],
                 horizontal=True,
-                key=f"create_media_kind_{_state().media_project}",
+                key=f"create_media_kind_{niche}_{state.media_project}",
                 help="Choose Video to upload an MP4, MOV, or WebM file.",
             )
             if upload_kind == "Video":
@@ -218,29 +223,35 @@ def render(
             else:
                 upload_types = ["jpg", "jpeg", "png", "gif", "webp", "avif"]
             upload = st.file_uploader(
-                f"Upload {upload_kind.lower()} to {_state().media_project}",
+                f"Upload {upload_kind.lower()} to {state.media_project}",
                 type=upload_types,
                 accept_multiple_files=False,
-                key=f"create_{upload_kind.lower()}_{_state().media_project}",
+                key=f"create_{upload_kind.lower()}_{niche}_{state.media_project}",
                 help=f"The file will be saved in `{media_dir.relative_to(settings.data_dir)}`.",
             )
+            if upload is not None:
+                st.text_input(
+                    f"Description for {upload.name} (required for catalog)",
+                    key=f"create_upload_desc_{niche}_{state.media_project}",
+                    placeholder="Brief description of what this image or video shows...",
+                )
 
     st.markdown("**Extra instructions (optional)**")
     extra = st.text_area(
         "Extra instructions",
-        key="create_extra",
+        key=f"create_extra_{niche}",
         label_visibility="collapsed",
         height=80,
         placeholder="e.g. mention my open-source project, target devs",
     )
 
-    generate_label = "Regenerate draft" if _state().editing_draft_id else "Generate draft"
+    generate_label = "Regenerate draft" if state.editing_draft_id else "Generate draft"
     if st.button(
         generate_label,
         type="primary",
-        key="create_generate",
+        key=f"create_generate_{niche}",
         use_container_width=True,
-        help="Two LLM calls: rephrase the source, then pick a project + write the CTA.",
+        help="Two LLM calls: rephrase the source, then pick an activation + write the CTA.",
     ):
         _on_generate(
             settings, db, ai, source, projects, upload, extra or "",
@@ -249,13 +260,13 @@ def render(
         )
 
     # ---- 2. Editor + live preview (bound to a draft row in the DB) ------
-    editing_id = _state().editing_draft_id
+    editing_id = state.editing_draft_id
     draft = db.get_draft(editing_id) if editing_id else None
     if draft is None:
         _render_saved_drafts(db, settings, kind="resumable")
         return
 
-    last_result = _state().last_workflow
+    last_result = state.last_workflow
     _render_editor_with_preview(
         settings, db, draft, last_workflow=last_result,
         x_client=x_client,
@@ -308,10 +319,28 @@ def _on_generate(
             if upload_dir is None:
                 st.error("Choose a project media folder before uploading media.")
                 return
+            upload_desc = st.session_state.get(
+                f"create_upload_desc_{settings.niche}_{state.media_project}", ""
+            ).strip()
+            if not upload_desc:
+                st.error("A description is required when adding media to the library catalog.")
+                return
             image_paths = _save_upload(upload, upload_dir)
             if not image_paths:
                 st.error("Failed to save the media upload.")
                 return
+            try:
+                from ..utils.media_catalog import catalog_path_for_data_dir, register_media
+
+                register_media(
+                    catalog_path_for_data_dir(settings.data_dir),
+                    project_name=state.media_project or "",
+                    filename=Path(image_paths[0]).name,
+                    description=upload_desc,
+                )
+            except Exception as exc:
+                st.warning(f"Media saved, but failed to log description: {exc}")
+
     if image_paths:
         st.caption(f"Media attached: `{Path(image_paths[0]).name}`")
 
@@ -626,7 +655,12 @@ def _render_image_library(
                 columns = st.columns(MEDIA_IMAGE_COLUMNS)
                 for offset, row in enumerate(rows[start:start + MEDIA_IMAGE_COLUMNS]):
                     with columns[offset]:
-                        _render_library_card(row, picked == row.local_path)
+                        _render_library_card(
+                            row,
+                            picked == row.local_path,
+                            settings=settings,
+                            project_name=selected_name if selected_is_project else "",
+                        )
         else:
             st.info("This folder has no images or videos yet.")
 
@@ -672,7 +706,12 @@ def _local_row_to_upload(local_path: str) -> MediaUpload:
     )
 
 
-def _render_library_card(row, is_picked: bool) -> None:
+def _render_library_card(
+    row,
+    is_picked: bool,
+    settings: Settings | None = None,
+    project_name: str = "",
+) -> None:
     path = Path(row.local_path)
     try:
         if path.exists() and is_video_path(path):
@@ -686,8 +725,22 @@ def _render_library_card(row, is_picked: bool) -> None:
 
     label = f"{row.filename}" + ("  ✓" if is_picked else "")
     st.caption(label)
+    if settings and project_name:
+        from ..utils.media_catalog import (
+            catalog_path_for_data_dir,
+            get_media_description,
+        )
+
+        desc = get_media_description(
+            catalog_path_for_data_dir(settings.data_dir),
+            project_name=project_name,
+            filename=path.name,
+        )
+        if desc:
+            st.caption(f"_{desc}_")
     if row.size:
         st.caption(f"{row.size // 1024} KB")
+
 
     btn_label = "✓ Using this" if is_picked else "Use this"
     if st.button(btn_label, key=f"use_lib_{row.local_path}", use_container_width=True):
@@ -742,7 +795,7 @@ def _render_saved_drafts(
             with cols[0]:
                 if st.button(
                     "Load for editing",
-                    key=f"create_load_{d.id}",
+                    key=f"create_load_{settings.niche}_{d.id}",
                     disabled=(d.id == current_id),
                     use_container_width=True,
                 ):
@@ -752,7 +805,7 @@ def _render_saved_drafts(
                 if d.image_paths:
                     st.caption(f"🖼 {len(d.image_paths)} image(s)")
             with cols[2]:
-                if st.button("Discard", key=f"create_discard_saved_{d.id}", use_container_width=True):
+                if st.button("Discard", key=f"create_discard_saved_{settings.niche}_{d.id}", use_container_width=True):
                     db.delete_draft(d.id)
                     if _state().editing_draft_id == d.id:
                         _state().editing_draft_id = None
