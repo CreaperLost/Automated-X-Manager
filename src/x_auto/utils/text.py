@@ -223,3 +223,59 @@ def validate_post_body(
         ))
 
     return errs
+
+
+def clean_humanized_text(text: str, niche: str = "") -> str:
+    """Strip em-dashes, en-dashes, double hyphens, and unwanted $AI tickers defensively."""
+    if not text:
+        return text
+    # Replace em-dashes and en-dashes with comma or clean spacing
+    cleaned = re.sub(r"\s*[—–]\s*", ", ", text)
+    cleaned = re.sub(r"\s*--\s*", ", ", cleaned)
+    # Fix awkward double punctuation from replacements
+    cleaned = re.sub(r",\s*,+", ",", cleaned)
+    cleaned = re.sub(r",\s*\.", ".", cleaned)
+    cleaned = re.sub(r",\s*:", ":", cleaned)
+    # Strip leading punctuation introduced at sentence start or line breaks
+    cleaned = re.sub(r"(?:^|\n)[,\s]+", lambda m: "\n" if "\n" in m.group(0) else "", cleaned)
+    cleaned = re.sub(r"[ \t]+", " ", cleaned)
+
+    # Clean unwanted $AI / $AGI tickers
+    clean_niche = (niche or "").strip().lower()
+    if clean_niche == "ai" or "$ai" in cleaned.lower() or "$agi" in cleaned.lower():
+        # Remove trailing $AI / $AGI (e.g. ". $AI" or " $AI")
+        cleaned = re.sub(r"\s+\$(?:AI|AGI)\s*$", "", cleaned, flags=re.IGNORECASE)
+        # Convert inline $AI / $AGI to plain AI / AGI
+        cleaned = re.sub(r"\$AI\b", "AI", cleaned, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\$AGI\b", "AGI", cleaned, flags=re.IGNORECASE)
+
+    return cleaned.strip()
+
+
+def format_cta_reply(cta_text: str, project_url: str, niche: str = "") -> str:
+    """Format a reply tweet guaranteeing the project URL is attached and within 280 X-chars.
+
+    Never truncates the URL. If the combined text exceeds 280 weighted characters,
+    the copy portion is truncated cleanly to fit.
+    """
+    clean_url = (project_url or "").strip()
+    # Remove project_url from cta_text if already present to isolate the copy
+    copy_text = cta_text.replace(clean_url, "").strip() if clean_url else cta_text.strip()
+    copy_text = clean_humanized_text(copy_text, niche=niche)
+
+    if not clean_url:
+        if x_char_count(copy_text) > X_MAX_POST_CHARS:
+            copy_text = copy_text[:X_MAX_POST_CHARS].rsplit(" ", 1)[0]
+        return copy_text
+
+    # On X, every URL is shortened via t.co to 23 characters.
+    # Total weighted chars = x_char_count(copy_text) + 1 (space) + 23 (URL)
+    max_copy_weighted = X_MAX_POST_CHARS - 24  # 256 chars
+    if x_char_count(copy_text) > max_copy_weighted:
+        copy_text = copy_text[:max_copy_weighted].rsplit(" ", 1)[0]
+
+    copy_text = copy_text.rstrip()
+    if copy_text and not copy_text.endswith((".", "!", "?", ":", "→")):
+        copy_text += ":"
+
+    return f"{copy_text} {clean_url}".strip() if copy_text else clean_url

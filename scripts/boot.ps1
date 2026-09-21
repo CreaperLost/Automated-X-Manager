@@ -50,13 +50,25 @@ else {
 }
 
 # 5. Local user configuration
-$Accounts = Join-Path $RepoRoot 'config\accounts.yaml'
-if (-not (Test-Path $Accounts)) {
-    Copy-Item (Join-Path $RepoRoot 'config\accounts.example.yaml') $Accounts
+$CryptoCreators = Join-Path $RepoRoot 'config\crypto\creators.yaml'
+if (-not (Test-Path $CryptoCreators)) {
+    New-Item -ItemType Directory -Force -Path (Join-Path $RepoRoot 'config\crypto') | Out-Null
+    Copy-Item (Join-Path $RepoRoot 'config\accounts.example.yaml') $CryptoCreators
 }
-$Projects = Join-Path $RepoRoot 'data\projects.csv'
-if (-not (Test-Path $Projects)) {
-    Copy-Item (Join-Path $RepoRoot 'data\projects.example.csv') $Projects
+$AICreators = Join-Path $RepoRoot 'config\ai\creators.yaml'
+if (-not (Test-Path $AICreators)) {
+    New-Item -ItemType Directory -Force -Path (Join-Path $RepoRoot 'config\ai') | Out-Null
+    Copy-Item (Join-Path $RepoRoot 'config\accounts.example.yaml') $AICreators
+}
+$CryptoProjects = Join-Path $RepoRoot 'data\crypto\projects.csv'
+if (-not (Test-Path $CryptoProjects)) {
+    New-Item -ItemType Directory -Force -Path (Join-Path $RepoRoot 'data\crypto') | Out-Null
+    Copy-Item (Join-Path $RepoRoot 'data\projects.example.csv') $CryptoProjects
+}
+$AIProjects = Join-Path $RepoRoot 'data\ai\projects.csv'
+if (-not (Test-Path $AIProjects)) {
+    New-Item -ItemType Directory -Force -Path (Join-Path $RepoRoot 'data\ai') | Out-Null
+    Copy-Item (Join-Path $RepoRoot 'data\projects.example.csv') $AIProjects
 }
 
 # 6. OAuth setup, if needed

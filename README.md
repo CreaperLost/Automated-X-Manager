@@ -89,22 +89,17 @@ Never commit `.env` or `data/oauth_tokens.json`.
 
 Use the sidebar inside the app:
 
-- **Handles** — add or remove X usernames, then click **Save**. Handles are
-  used only when you manually click **Fetch recent**.
-- **Projects** — add project names and URLs. During generation, the second AI
-  step selects a relevant project and creates a short CTA reply containing its
-  URL.
-- **Model** — select the available MiniMax model.
+- **Niche Selector** — switch between **Crypto** and **AI** niches. The app dynamically swaps the active configuration, monitored creators, activations, media cache, and database.
+- **Model** — select the available MiniMax model for the active niche.
+- **Creators** — add or remove monitored X creator usernames for the active niche, then click **Save**.
+- **Activations (Projects)** — add project names and URLs for the active niche. During generation, the AI auto-picks the best activation and creates a short CTA reply containing its URL.
 
-Handle and project configuration is tracked in Git:
+Configuration and activations are separated into distinct directories tracked in Git:
 
-- `config/accounts.yaml`
-- `data/projects.csv`
+- **Crypto**: `config/crypto/creators.yaml` and `data/crypto/projects.csv`
+- **AI**: `config/ai/creators.yaml` and `data/ai/projects.csv`
 
-Example files are also provided as `config/accounts.example.yaml` and
-`data/projects.example.csv` for reference.
-
-The project folders under `data/media_cache/` are preserved with `.gitkeep`
+The project folders under `data/crypto/media_cache/` and `data/ai/media_cache/` are preserved with `.gitkeep`
 files, while their generated or downloaded contents remain excluded from Git.
 
 ## Daily use
@@ -130,13 +125,13 @@ bash scripts/stop.sh
 
 Runtime output is written to `data/x-automation.log`.
 
-1. Open **Sources**.
-2. Reuse a saved source or click **Fetch recent**.
+1. Choose **Crypto** or **AI** from the sidebar.
+2. Open **Sources** and reuse a saved source or click **Fetch recent**.
 3. Select a source and open **Create**.
 4. Choose **Rephrase** or **Original take**.
-5. Optionally select a source image or one of your own images.
+5. Optionally select a source image or an image from that niche's media library.
 6. Click **Generate draft**.
-7. Edit and review the post.
+7. Edit and review the post and CTA reply.
 8. Choose **Post now**.
 
 Source posts are inspiration only. The app does not quote third-party posts
@@ -146,14 +141,14 @@ when publishing.
 
 These files are created locally and ignored by Git:
 
-| Path | Purpose |
-| --- | --- |
-| `.env` | API credentials |
-| `config/accounts.yaml` | Monitored handles |
-| `data/projects.csv` | Personal projects and URLs |
-| `data/oauth_tokens.json` | X OAuth access and refresh tokens |
-| `data/state.db` | Sources, drafts, post history, and application state |
-| `data/media_cache/` | Image and video library, organized into one folder per project |
+| Path                             | Purpose                                                        |
+| -------------------------------- | -------------------------------------------------------------- |
+| `.env`                           | API credentials                                                |
+| `data/oauth_tokens.json`         | Shared X OAuth access and refresh tokens                       |
+| `data/crypto/state.db`           | Crypto sources, drafts, post history, and application state    |
+| `data/crypto/media_cache/`       | Crypto image and video library, organized by project           |
+| `data/ai/state.db`               | AI sources, drafts, post history, and application state        |
+| `data/ai/media_cache/`           | AI image and video library, organized by project               |
 
 Back up the `data/` directory if you need to preserve drafts and media.
 Do not publish that backup.

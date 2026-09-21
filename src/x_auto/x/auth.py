@@ -254,6 +254,10 @@ class TokenManager:
     def __init__(self, settings=None, store: TokenStore | None = None) -> None:
         self._settings = settings or get_settings()
         path = self._settings.data_dir / "oauth_tokens.json"
+        if not path.exists() and hasattr(self._settings, "repo_root") and self._settings.repo_root:
+            fallback = self._settings.repo_root / "data" / "oauth_tokens.json"
+            if fallback.exists():
+                path = fallback
         self._store = store or TokenStore(path)
         self._cached: TokenBundle | None = None
 

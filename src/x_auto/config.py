@@ -35,13 +35,19 @@ def _load_yaml(path: Path) -> Any:
 
 def load_accounts(config_dir: Path = CONFIG_DIR) -> list[dict[str, str]]:
     """Read, normalize, validate, and de-duplicate monitored X handles."""
-    data = _load_yaml(config_dir / "accounts.yaml")
+    p = config_dir / "creators.yaml"
+    data = _load_yaml(p) if p.exists() else None
+    if data is None:
+        # Legacy fallback if creators.yaml is not found
+        legacy = config_dir / "accounts.yaml"
+        if legacy.exists():
+            data = _load_yaml(legacy)
     if data is None:
         return []
     if isinstance(data, list):
         items = data
     elif isinstance(data, dict):
-        items = data.get("accounts", [])
+        items = data.get("creators", []) or data.get("accounts", [])
     else:
         items = []
     out: list[dict[str, str]] = []
@@ -59,7 +65,7 @@ def load_accounts(config_dir: Path = CONFIG_DIR) -> list[dict[str, str]]:
 
 
 def write_accounts(config_dir: Path, handles: list[str]) -> list[dict[str, str]]:
-    """Persist validated handles and return the normalized rows written."""
+    """Persist validated handles to creators.yaml and return the normalized rows written."""
     rows: list[dict[str, str]] = []
     seen: set[str] = set()
     for raw in handles:
@@ -69,13 +75,13 @@ def write_accounts(config_dir: Path, handles: list[str]) -> list[dict[str, str]]
             continue
         seen.add(key)
         rows.append({"handle": handle})
-    path = config_dir / "accounts.yaml"
+    path = config_dir / "creators.yaml"
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(
+    content = (
         "# Pool of X handles to monitor.\n"
-        + yaml.safe_dump(rows, sort_keys=False, allow_unicode=True),
-        encoding="utf-8",
+        + yaml.safe_dump(rows, sort_keys=False, allow_unicode=True)
     )
+    path.write_text(content, encoding="utf-8")
     return rows
 
 
@@ -122,27 +128,47 @@ class Settings:
     minimax: MinimaxSettings
     x: XSettings
     ui: UISettings
+    niche: str = "crypto"
 
 
-@lru_cache(maxsize=1)
-def get_settings() -> Settings:
+SUPPORTED_NICHES = ("crypto", "ai")
+DEFAULT_NICHE = "crypto"
+
+
+def _deep_merge(base: dict, overlay: dict) -> dict:
+    out = dict(base)
+    for k, v in overlay.items():
+        if k in out and isinstance(out[k], dict) and isinstance(v, dict):
+            out[k] = _deep_merge(out[k], v)
+        else:
+            out[k] = v
+    return out
+
+
+@lru_cache(maxsize=8)
+def get_settings(niche: str = DEFAULT_NICHE) -> Settings:
+    niche_clean = (niche or DEFAULT_NICHE).strip().lower()
     load_dotenv(REPO_ROOT / ".env", override=False)
-    raw = _load_yaml(CONFIG_DIR / "settings.yaml")
+
+    niche_config_dir = CONFIG_DIR / niche_clean
+    effective_config_dir = niche_config_dir if niche_config_dir.exists() else CONFIG_DIR
+
+    niche_data_dir = DATA_DIR / niche_clean
+    effective_data_dir = niche_data_dir if (niche_data_dir.exists() or niche_config_dir.exists()) else DATA_DIR
+
+    base_raw = _load_yaml(CONFIG_DIR / "settings.yaml") or {}
+    if effective_config_dir != CONFIG_DIR and (effective_config_dir / "settings.yaml").exists():
+        niche_raw = _load_yaml(effective_config_dir / "settings.yaml") or {}
+        raw = _deep_merge(base_raw, niche_raw)
+    else:
+        raw = base_raw
 
     mm_raw = raw.get("minimax", {}) or {}
-    # Resolution order for base_url: MINIMAX_BASE_URL env var > YAML > default.
-    # Without this, the env var was loaded into os.environ but ignored —
-    # so users editing .env to point at a different host (e.g. switching
-    # between MiniMax regions) saw the live app keep hitting the YAML host.
     minimax = MinimaxSettings(
         base_url=os.environ.get("MINIMAX_BASE_URL", "").strip()
         or str(mm_raw.get("base_url", "https://api.minimax.io/v1")),
         model_id=str(mm_raw.get("model_id", "MiniMax-M2.7")),
         temperature=float(mm_raw.get("temperature", 0.7)),
-        # 400 was the historical default but is too low for "thinking"
-        # models like MiniMax-M3, which spend ~500 tokens inside a
-        # <think>…</think> block before the JSON. 2048 leaves headroom
-        # for both the reasoning and the structured output.
         max_tokens=int(mm_raw.get("max_tokens", 2048)),
         api_key=os.environ.get("MINIMAX_API_KEY", "").strip(),
     )
@@ -159,17 +185,19 @@ def get_settings() -> Settings:
     )
 
     ui_raw = raw.get("ui", {}) or {}
+    default_page_title = f"X-Automation · {niche_clean.title()}" if niche_clean != "crypto" else "X-Automation · Crypto"
     ui = UISettings(
-        page_title=str(ui_raw.get("page_title", "X-Automation")),
+        page_title=str(ui_raw.get("page_title", default_page_title)),
         cost_warning_threshold_usd=float(ui_raw.get("cost_warning_threshold_usd", 1.00)),
     )
 
     return Settings(
         repo_root=REPO_ROOT,
-        data_dir=DATA_DIR,
-        config_dir=CONFIG_DIR,
-        accounts=tuple(load_accounts()),
+        data_dir=effective_data_dir,
+        config_dir=effective_config_dir,
+        accounts=tuple(load_accounts(effective_config_dir)),
         minimax=minimax,
         x=x_settings,
         ui=ui,
+        niche=niche_clean,
     )

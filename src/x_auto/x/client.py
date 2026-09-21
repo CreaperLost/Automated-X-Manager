@@ -309,3 +309,11 @@ class XClient:
         await self._request("DELETE", f"/tweets/{post_id}", auth="user")
         self._meter.add_write(COST_POST_DELETED)
         return True
+
+    async def get_tweet_metrics(self, post_id: PostId) -> dict[str, int]:
+        """GET /2/tweets/:id with public_metrics ($0.005)."""
+        params = {"tweet.fields": "public_metrics"}
+        body, _ = await self._request("GET", f"/tweets/{post_id}", auth="bearer", params=params)
+        self._meter.add_read_post(1)
+        data = body.get("data", {})
+        return dict(data.get("public_metrics", {}))

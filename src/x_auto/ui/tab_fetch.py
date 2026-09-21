@@ -17,7 +17,7 @@ def render(
 ) -> None:
     st.header("Fetch")
     st.caption(
-        "Pull recent tweets from the accounts in `config/accounts.yaml`. "
+        f"Pull recent tweets from the creators configured for this niche. "
         f"Fetches up to {settings.x.recent_max_results} posts per handle. "
         "Estimated maximum: "
         f"${0.010 + settings.x.recent_max_results * 0.005:0.3f} per handle "
@@ -26,7 +26,7 @@ def render(
 
     pool = settings.accounts
     if not pool:
-        st.warning("No handles configured. Edit `config/accounts.yaml`.")
+        st.warning(f"No creators configured in `config/{settings.niche}/creators.yaml`.")
         return
 
     st.markdown("**Handle pool**")
