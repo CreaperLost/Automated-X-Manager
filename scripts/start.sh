@@ -9,7 +9,8 @@ PID_FILE="$REPO_ROOT/data/x-automation.pid"
 LOG_FILE="$REPO_ROOT/data/x-automation.log"
 APP_URL="http://localhost:8501"
 
-if [[ ! -x .venv/bin/python || ! -f .env ]]; then
+if { [[ ! -x .venv/bin/python ]] && [[ ! -x .venv/Scripts/python.exe ]]; } \
+    || [[ ! -f .env ]]; then
     echo "X-Automation is not set up yet. Run this once first:" >&2
     echo "  bash scripts/boot.sh" >&2
     exit 1

@@ -1,2 +1,5 @@
 # Auto detect text files and perform LF normalization
 * text=auto
+
+# Bash treats CRLF control characters as syntax on Windows/WSL/Git Bash.
+*.sh text eol=lf
