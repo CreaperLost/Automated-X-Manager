@@ -16,7 +16,7 @@ python_is_supported() {
 
 find_supported_python() {
     local candidate
-    for candidate in python3.11 python3.12 python3.13 python3.14 python3; do
+    for candidate in python3.11 python3.12 python3.13 python3.14 python3 python; do
         if command -v "$candidate" >/dev/null 2>&1 && python_is_supported "$candidate"; then
             command -v "$candidate"
             return 0
@@ -25,8 +25,20 @@ find_supported_python() {
     return 1
 }
 
-if [[ -x .venv/bin/python ]] && python_is_supported .venv/bin/python; then
-    echo "==> .venv present ($(.venv/bin/python --version 2>&1))"
+find_venv_python() {
+    local candidate
+    for candidate in .venv/bin/python .venv/Scripts/python.exe; do
+        if [[ -x "$candidate" ]]; then
+            printf '%s\n' "$candidate"
+            return 0
+        fi
+    done
+    return 1
+}
+
+VENV_PYTHON="$(find_venv_python || true)"
+if [[ -n "$VENV_PYTHON" ]] && python_is_supported "$VENV_PYTHON"; then
+    echo "==> .venv present ($("$VENV_PYTHON" --version 2>&1))"
 else
     PYTHON_BIN="$(find_supported_python || true)"
     if [[ -z "$PYTHON_BIN" ]]; then
@@ -42,12 +54,13 @@ else
         echo "==> Creating .venv with $($PYTHON_BIN --version 2>&1)"
         "$PYTHON_BIN" -m venv .venv
     fi
+    VENV_PYTHON="$(find_venv_python)"
 fi
 
 # deps
 echo "==> Installing requirements"
-.venv/bin/python -m pip install --upgrade pip --quiet
-.venv/bin/python -m pip install -r requirements.txt --quiet
+"$VENV_PYTHON" -m pip install --upgrade pip --quiet
+"$VENV_PYTHON" -m pip install -r requirements.txt --quiet
 
 # .env
 if [[ ! -f .env ]]; then
@@ -65,7 +78,7 @@ fi
 # OAuth setup, if needed
 if [[ ! -f data/oauth_tokens.json ]]; then
     echo "==> Running scripts/auth_setup.py (opens browser)"
-    .venv/bin/python scripts/auth_setup.py
+    "$VENV_PYTHON" scripts/auth_setup.py
 fi
 
 # Launch
@@ -74,7 +87,7 @@ echo "==> Launching Streamlit on http://localhost:8501"
 echo "    Press Ctrl-C to stop."
 echo ""
 export STREAMLIT_GLOBAL_DEVELOPMENT_MODE=false
-exec .venv/bin/streamlit run src/x_auto/app.py \
+exec "$VENV_PYTHON" -m streamlit run src/x_auto/app.py \
     --server.headless true \
     --server.port 8501 \
     --client.toolbarMode minimal \

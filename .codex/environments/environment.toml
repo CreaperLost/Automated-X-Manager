@@ -11,9 +11,9 @@ script = "bash scripts/stop.sh"
 [[actions]]
 name = "Run"
 icon = "run"
-command = "bash scripts/start.sh"
+command = "& 'C:\\Program Files\\Git\\bin\\bash.exe' scripts/start.sh"
 
 [[actions]]
 name = "Stop"
 icon = "tool"
-command = "bash scripts/stop.sh"
+command = "& 'C:\\Program Files\\Git\\bin\\bash.exe' bash scripts/stop.sh"
