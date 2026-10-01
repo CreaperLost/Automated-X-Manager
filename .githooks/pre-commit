@@ -1,0 +1,8 @@
+#!/bin/sh
+if [ -x .venv/Scripts/python.exe ]; then
+    exec .venv/Scripts/python.exe scripts/check_git_secrets.py
+elif [ -x .venv/bin/python ]; then
+    exec .venv/bin/python scripts/check_git_secrets.py
+else
+    exec python scripts/check_git_secrets.py
+fi

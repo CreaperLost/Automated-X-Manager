@@ -1,5 +1,11 @@
 # X-Automation
 
+> **Rust port in progress.** A native Tauri rewrite of this application
+> lives in `crates/x-core` + `src-tauri` + `dist/`. It reads the same
+> database, the same `.env`, and the same config, and keeps the same
+> pricing rules. The Streamlit app below is unmodified and still runs.
+> See [RUST_PORT.md](RUST_PORT.md).
+
 X-Automation is a local Streamlit application for researching posts on X,
 turning selected sources into original drafts, and publishing them with
 explicit control over every paid action.
@@ -94,13 +100,13 @@ Use the sidebar inside the app:
 - **Creators** — add or remove monitored X creator usernames for the active niche, then click **Save**.
 - **Activations (Projects)** — add project names and URLs for the active niche. During generation, the AI auto-picks the best activation and creates a short CTA reply containing its URL.
 
-Configuration and activations are separated into distinct directories tracked in Git:
+Personal configuration and activations are separated into local directories ignored by Git:
 
 - **Crypto**: `config/crypto/creators.yaml` and `data/crypto/projects.csv`
 - **AI**: `config/ai/creators.yaml` and `data/ai/projects.csv`
 
-The project folders under `data/crypto/media_cache/` and `data/ai/media_cache/` are preserved with `.gitkeep`
-files, while their generated or downloaded contents remain excluded from Git.
+The media folders and their contents also stay local. Public setup templates
+are provided in `config/accounts.example.yaml` and `data/projects.example.csv`.
 
 ## Daily use
 

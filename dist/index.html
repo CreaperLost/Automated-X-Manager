@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><meta name="color-scheme" content="dark"/><title>X-Automation · Publishing studio</title><link rel="stylesheet" href="styles.css"/></head>
+<body>
+<svg class="icon-defs" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><defs>
+<symbol id="i-sources" viewBox="0 0 24 24"><path d="M4 5h16v14H4zM8 9h8M8 13h5"/></symbol>
+<symbol id="i-create" viewBox="0 0 24 24"><path d="m15 4 5 5-11 11H4v-5zM12 7l5 5"/></symbol>
+<symbol id="i-queue" viewBox="0 0 24 24"><path d="M5 4h14v16H5zM9 8h6M9 12h6M9 16h3"/></symbol>
+<symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 7h16M4 17h16M8 4v6M16 14v6"/></symbol>
+<symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14m-5-5 5 5-5 5"/></symbol>
+<symbol id="i-spark" viewBox="0 0 24 24"><path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5z"/></symbol>
+</defs></svg>
+<div id="app" class="shell">
+<aside class="sidebar">
+<div class="brand"><span class="brand-mark">X<span></span></span><div><strong>X-Automation</strong><span class="brand-sub">PUBLISHING STUDIO</span></div></div>
+<div class="sidebar-label">Workspace</div>
+<div class="niche-switch" role="tablist" aria-label="Niche"><button class="niche-btn is-active" data-niche="crypto" role="tab" aria-selected="true">Crypto</button><button class="niche-btn" data-niche="ai" role="tab" aria-selected="false">AI</button></div>
+<nav class="viewswitch" aria-label="Workspace navigation">
+<button class="view-btn is-active" data-view="sources" aria-current="page"><svg class="icon" aria-hidden="true"><use href="#i-sources"/></svg>Sources<span class="nav-count" id="source-count">0</span></button>
+<button class="view-btn" data-view="create"><svg class="icon" aria-hidden="true"><use href="#i-create"/></svg>Create</button>
+<button class="view-btn" data-view="queue"><svg class="icon" aria-hidden="true"><use href="#i-queue"/></svg>Queue<span class="nav-count" id="draft-count">0</span></button>
+<button class="view-btn" data-view="settings"><svg class="icon" aria-hidden="true"><use href="#i-settings"/></svg>Settings</button>
+</nav>
+<div class="sidebar-bottom">
+<div class="meter" id="meter"><span class="meter-label">Session spend</span><span class="meter-value" id="meter-value">$0.0000</span></div>
+<div class="account-card"><span class="avatar avatar-small" id="account-avatar">X</span><div><strong id="account-name">Your X account</strong><span id="account-state" role="status">Checking connection…</span></div><span class="connection-dot" id="account-dot"></span></div>
+<button class="btn btn-quiet auth-button" id="btn-auth">Connect X account <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></button>
+<div class="local-label"><span></span> Runs locally on your computer</div>
+</div></aside>
+<div class="workspace">
+<header class="topbar"><div class="breadcrumb"><span id="workspace-niche">Crypto workspace</span><span>/</span><strong id="breadcrumb-view">Sources</strong></div><span class="topbar-note">Research. Write. Publish.</span></header>
+<main class="content">
+<div class="page-heading"><div><span class="eyebrow" id="page-eyebrow">YOUR RESEARCH DESK</span><h1 id="page-title">Find your next idea.</h1><p id="page-sub">Collect the posts worth turning into something of your own.</p></div><span class="workspace-pill"><span></span><span id="workspace-label">Crypto</span></span></div>
+<div class="banner" id="banner" role="status" aria-live="polite" hidden></div><div class="operation-status" id="operation-status" role="status" hidden></div>
+<section class="view is-active" id="view-sources" aria-label="Sources">
+<div class="fetch-panel"><div><div class="section-heading"><svg class="icon" aria-hidden="true"><use href="#i-sources"/></svg><h2>Your creator watchlist</h2></div><div class="chips" id="creator-chips"></div><p class="hint" id="fetch-hint">About $0.010 per creator + $0.005 per post.</p></div><div class="fetch-actions"><button class="btn btn-primary" id="btn-fetch">Fetch recent <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></button><button class="text-button" data-open-settings>Manage creators</button></div></div>
+<div class="panel-head source-toolbar"><div><h2>Saved sources</h2><p class="hint">Choose a post to bring it into the editor.</p></div><div class="filter-group" aria-label="Filter sources"><button class="chip is-active" data-status="">All</button><button class="chip" data-status="new">New</button><button class="chip" data-status="selected">Selected</button><button class="chip" data-status="archived">Archived</button></div></div>
+<div class="tweet-list" id="tweet-list"></div></section>
+<section class="view" id="view-create" aria-label="Create">
+<div class="create-grid"><div class="editor-column">
+<details class="panel source-context" open><summary><span>Source inspiration</span><span class="summary-note">Optional</span></summary><div class="selected-source" id="selected-source"><p class="empty">Choose a source from your research desk, or start with your own instructions.</p></div></details>
+<div class="panel generate-panel"><div class="panel-head"><h2><svg class="icon" aria-hidden="true"><use href="#i-spark"/></svg>Shape your idea</h2><span class="small-label">AI ASSIST</span></div><div class="control-row"><label class="field"><span>Writing mode</span><select class="input" id="writing-mode"><option value="rephrase">Rephrase</option><option value="original_take">Original take</option></select></label><label class="field"><span>Media attachment</span><select class="input" id="media-select"><option value="">No image</option></select></label></div><label class="field"><span>Extra instructions</span><textarea class="input" id="extra-instructions" rows="2" placeholder="What angle would you like to take?"></textarea></label><div class="editor-row"><button class="btn btn-primary" id="btn-generate"><svg class="icon" aria-hidden="true"><use href="#i-spark"/></svg>Generate draft</button><button class="btn btn-quiet" id="btn-two-options">Explore two options</button></div><p class="hint">Powered by MiniMax · Review every draft before publishing.</p></div>
+<div class="panel" id="options-panel" hidden><div class="panel-head"><h2>Choose your direction</h2></div><div class="options" id="options"></div></div>
+<div class="panel editor-panel"><div class="panel-head"><h2>Make it yours</h2><span class="small-label" id="editing-label">NEW DRAFT</span></div><label class="field"><span>Main post <em id="main-count">0 / 280</em></span><textarea class="input textarea main-editor" id="body-input" rows="6" placeholder="Write something worth sharing…"></textarea></label><label class="field reply-field"><span>Follow-up reply <em id="reply-count">0 / 280</em></span><textarea class="input textarea" id="link-input" rows="3" placeholder="Add your call to action and link here."></textarea></label><p class="hint">Keep links in the reply to reduce the estimated posting cost.</p></div>
+</div><aside class="preview-column"><div class="preview-sticky">
+<div class="preview-title"><span class="eyebrow">LIVE PREVIEW</span><span class="preview-platform">𝕏</span></div>
+<div class="post-preview"><div class="preview-head"><span class="avatar" id="preview-avatar">X</span><div><strong id="preview-name">Your account</strong><span id="preview-handle">@yourhandle</span></div><span class="preview-more" aria-hidden="true">···</span></div><div class="preview-body is-placeholder" id="preview-body">Your next post starts here.</div><img id="preview-media" class="preview-media" alt="Selected post attachment" hidden/><div class="preview-social" aria-hidden="true"><span>♡</span><span>↻</span><span>↗</span></div><div class="reply-preview" id="reply-preview" hidden><span class="avatar avatar-small preview-reply-avatar">X</span><div><strong id="preview-reply-name">Your account</strong><div id="preview-reply-body"></div></div></div></div>
+<p class="preview-caption">A preview of your post and follow-up reply.</p>
+<div class="publish-panel"><div class="panel-head"><h2>Ready when you are.</h2><span class="small-label">REVIEW</span></div><div class="validation" id="validation"></div><div class="cost-preview" id="cost-preview"><span class="hint">Add your post to see the estimated cost.</span></div><div class="publish-actions"><button class="btn" id="btn-save-draft">Save draft</button><button class="btn btn-primary" id="btn-post" disabled>Publish to X <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></button></div><p class="hint publish-note" id="publish-note">Save your draft before publishing.</p></div>
+</div></aside></div></section>
+<section class="view" id="view-queue" aria-label="Queue"><div class="queue-grid"><div><div class="panel-head source-toolbar"><h2>Your drafts</h2><div class="filter-group" aria-label="Filter drafts"><button class="chip is-active" data-dstatus="">All</button><button class="chip" data-dstatus="draft">Draft</button><button class="chip" data-dstatus="final">Final</button><button class="chip" data-dstatus="posted">Posted</button><button class="chip" data-dstatus="failed">Failed</button></div></div><div class="draft-list" id="draft-list"></div></div><aside class="panel history-panel"><div class="panel-head"><h2>Recent activity</h2></div><p class="hint">Your publishing history, at a glance.</p><div class="history" id="history"></div></aside></div></section>
+<section class="view" id="view-settings" aria-label="Settings"><div class="settings-grid">
+<div class="panel"><div class="panel-head"><h2>Creators</h2><span class="small-label">RESEARCH</span></div><p class="hint">The accounts you follow for ideas. Changes apply to this workspace.</p><label class="field"><span>Add an X handle</span><div class="editor-row"><input class="input" id="creator-input" placeholder="e.g. elonmusk"/><button class="btn" id="btn-add-creator">Add</button></div></label><div class="chips" id="creator-list"></div><button class="btn btn-primary" id="btn-save-creators">Save creators</button></div>
+<div class="panel"><div class="panel-head"><h2>Projects &amp; activations</h2><span class="small-label">WRITING</span></div><p class="hint">AI can match your post to a project and suggest a reply with its link.</p><div class="editor-row project-add"><input class="input" id="project-name" aria-label="New project name" placeholder="Project name"/><input class="input" id="project-url" aria-label="New project URL" placeholder="https://example.com"/><button class="btn" id="btn-add-project">Add</button></div><div class="project-list" id="project-list"></div><button class="btn btn-primary" id="btn-save-projects">Save projects</button></div></div>
+<details class="panel storage-panel"><summary><span>Local storage</span><span class="summary-note">Details</span></summary><p class="hint">Your workspace data is stored on this computer.</p><code id="storage-path"></code></details></section>
+</main></div></div><script src="app.js"></script></body></html>

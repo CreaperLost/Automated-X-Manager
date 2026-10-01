@@ -1,3 +1,8 @@
+# Rust / Tauri
+/target/
+**/target/
+*.rs.bk
+
 # Python
 __pycache__/
 *.pyc
@@ -15,6 +20,12 @@ coverage.xml
 htmlcov/
 build/
 dist/
+# Tauri uses these three files as frontend source, not generated output.
+!/dist/
+/dist/*
+!/dist/index.html
+!/dist/styles.css
+!/dist/app.js
 *.egg-info/
 
 # Virtual env
@@ -32,6 +43,21 @@ env/
 *.p12
 *.pfx
 *credentials*.json
+*credentials*.json.*
+**/oauth_tokens*
+**/auth_url.txt
+**/secrets.toml*
+*.pem.*
+*.key.*
+*.p12.*
+*.pfx.*
+*.log.*
+
+# Personal workspace configuration (public examples remain tracked).
+config/**/creators.yaml*
+config/**/accounts.yaml*
+config/creators.yaml*
+config/accounts.yaml*
 
 # Runtime state
 data/*.db
@@ -56,6 +82,21 @@ data/x-automation.pid
 data/**/x-automation.pid
 *.log
 .tmp_*
+
+# Override legacy placeholder exceptions: project names and links stay private.
+/data/**
+!/data/**/
+!/data/projects.example.csv
+*.bak
+*.bak-*
+*.backup
+*.backup-*
+*.har
+.aws/
+.ssh/
+*.p8
+.env-*
+*.env
 
 # OS
 .DS_Store

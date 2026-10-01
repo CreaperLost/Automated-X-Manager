@@ -1,0 +1,1 @@
+{"default":{"identifier":"default","description":"Capabilities for the X-Automation main window.","local":true,"windows":["main"],"permissions":["core:default","core:window:allow-start-dragging","dialog:allow-open","dialog:allow-message","opener:allow-open-url"]}}
