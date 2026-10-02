@@ -33,10 +33,7 @@ pub async fn publish_draft(
     draft: &mut Draft,
 ) -> Result<PublishResult> {
     // --- deterministic local rules, before any paid write ---
-    let mut errors = validate_post_body(&draft.body, "main", false);
-    if let Some(link) = &draft.link_url {
-        errors.extend(validate_post_body(link, "reply", true));
-    }
+    let errors = validate_draft(draft);
     if !errors.is_empty() {
         return Err(Error::Validation(
             errors
@@ -64,6 +61,18 @@ pub async fn publish_draft(
     }
 
     // --- uploads (free on X) ---
+    // Validate all files before starting any uploads.
+    for raw in &draft.image_paths {
+        let path = resolve_attachment(&settings.data_dir, raw);
+        let validation = if is_video_path(&path) {
+            crate::utils::files::validate_video(&path)
+        } else {
+            crate::utils::files::validate_image(&path)
+        };
+        if !validation.ok {
+            return Err(Error::Validation(validation.reason));
+        }
+    }
     let mut media_ids: Vec<String> = Vec::new();
     for raw in &draft.image_paths {
         let path = resolve_attachment(&settings.data_dir, raw);
@@ -125,6 +134,20 @@ pub fn validate_draft(draft: &Draft) -> Vec<crate::utils::text::PostValidationEr
     if let Some(link) = &draft.link_url {
         errors.extend(validate_post_body(link, "reply", true));
     }
+    let videos = draft.image_paths.iter().filter(|path| is_video_path(path)).count();
+    let media_error = if videos > 0 && draft.image_paths.len() != 1 {
+        Some("A video must be the only media attachment.")
+    } else if draft.image_paths.len() > crate::utils::files::MAX_IMAGES_PER_POST {
+        Some("Attach up to four images or one video.")
+    } else {
+        None
+    };
+    if let Some(message) = media_error {
+        errors.push(crate::utils::text::PostValidationError {
+            code: "media_attachments".into(), message: message.into(),
+            hint: "Remove extra attachments before publishing.".into(),
+        });
+    }
     errors
 }
 
@@ -165,6 +188,20 @@ mod tests {
         let d = draft_with("clean body", Some("get it https://proj.com"), &[]);
         let errs = validate_draft(&d);
         assert!(errs.is_empty(), "{errs:?}");
+    }
+
+    #[test]
+    fn media_limits_are_checked_in_the_publish_preview() {
+        let four = draft_with("clean body", None, &["a.png", "b.jpg", "c.webp", "d.png"]);
+        assert!(validate_draft(&four).is_empty());
+        let five = draft_with("clean body", None, &["a.png", "b.jpg", "c.png", "d.png", "e.png"]);
+        assert!(validate_draft(&five).iter().any(|e| e.code == "media_attachments"));
+        let video = draft_with("clean body", None, &["clip.MP4"]);
+        assert!(validate_draft(&video).is_empty());
+        let mixed = draft_with("clean body", None, &["clip.mp4", "a.png"]);
+        assert!(validate_draft(&mixed).iter().any(|e| e.code == "media_attachments"));
+        let videos = draft_with("clean body", None, &["clip.mp4", "other.webm"]);
+        assert!(validate_draft(&videos).iter().any(|e| e.code == "media_attachments"));
     }
 
     #[test]

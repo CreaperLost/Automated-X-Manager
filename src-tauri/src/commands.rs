@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
-use tauri::State;
+use tauri::{Manager, State};
 use tauri_plugin_opener::OpenerExt;
 use x_core::ai::client::AiClient;
 use x_core::ai::prompts::ProjectRef;
@@ -658,7 +658,14 @@ pub fn import_media(
     let (_db, rt) = ensure_runtime(&state, &niche)?;
 
     let src = PathBuf::from(&source_path);
-    let validation = x_core::utils::files::validate_image(&src);
+    if project_name.trim().is_empty() {
+        return Err(CoreError::validation("Choose a project for imported media.").into());
+    }
+    let validation = if x_core::utils::files::is_video_path(&src) {
+        x_core::utils::files::validate_video(&src)
+    } else {
+        x_core::utils::files::validate_image(&src)
+    };
     if !validation.ok {
         return Err(CmdError { kind: "media".into(), message: validation.reason });
     }
@@ -673,7 +680,15 @@ pub fn import_media(
         kind: "io".into(),
         message: format!("create {}: {e}", folder.display()),
     })?;
-    let dest = folder.join(&filename);
+    // Never replace an existing library asset, including one used by a draft.
+    let mut dest = folder.join(&filename);
+    let mut suffix = 1;
+    while dest.exists() {
+        let stem = src.file_stem().unwrap_or_default().to_string_lossy();
+        let ext = src.extension().unwrap_or_default().to_string_lossy();
+        dest = folder.join(format!("{stem}-{suffix}.{ext}"));
+        suffix += 1;
+    }
     std::fs::copy(&src, &dest).map_err(|e| CmdError {
         kind: "io".into(),
         message: format!("copy to {}: {e}", dest.display()),
@@ -681,22 +696,34 @@ pub fn import_media(
     Ok(dest.to_string_lossy().to_string())
 }
 
-/// Read a local media file as a data URL so the webview can render it
-/// without a custom asset protocol.
+/// Grant preview access to one validated library asset. Videos use range
+/// requests through Tauri's asset protocol, rather than base64 over IPC.
 #[tauri::command]
-pub fn read_media_data_url(path: String) -> CmdResult<String> {
-    use base64::Engine;
-    let p = PathBuf::from(&path);
-    let mime = x_core::utils::files::mime_from_extension(
-        &p.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default(),
-    );
-    let mime = if mime.is_empty() { "application/octet-stream".to_string() } else { mime };
-    let bytes = std::fs::read(&p).map_err(|e| CmdError {
-        kind: "io".into(),
-        message: format!("read {}: {e}", p.display()),
-    })?;
-    let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
-    Ok(format!("data:{mime};base64,{b64}"))
+pub fn prepare_media_preview(
+    app: tauri::AppHandle,
+    state: State<'_, AppState>,
+    niche: String,
+    path: String,
+) -> CmdResult<String> {
+    let (_db, rt) = ensure_runtime(&state, &niche)?;
+    let cache = std::fs::canonicalize(rt.settings.data_dir.join("media_cache"))
+        .map_err(|e| CoreError::Io(e.to_string()))?;
+    let resolved = x_core::x::media::resolve_attachment(&rt.settings.data_dir, &path);
+    let asset = std::fs::canonicalize(resolved).map_err(|e| CoreError::Io(e.to_string()))?;
+    if !asset.starts_with(&cache) {
+        return Err(CoreError::validation("Preview files must be in this workspace's media library.").into());
+    }
+    let validation = if x_core::utils::files::is_video_path(&asset) {
+        x_core::utils::files::validate_video(&asset)
+    } else {
+        x_core::utils::files::validate_image(&asset)
+    };
+    if !validation.ok {
+        return Err(CoreError::validation(validation.reason).into());
+    }
+    app.asset_protocol_scope().allow_file(&asset)
+        .map_err(|e| CoreError::Io(e.to_string()))?;
+    Ok(asset.to_string_lossy().to_string())
 }
 
 // ---- auth ------------------------------------------------------------------
@@ -815,7 +842,7 @@ macro_rules! command_list {
             $crate::commands::list_project_media,
             $crate::commands::register_media_description,
             $crate::commands::import_media,
-            $crate::commands::read_media_data_url,
+            $crate::commands::prepare_media_preview,
             $crate::commands::begin_auth,
             $crate::commands::finish_auth,
             $crate::commands::identity,

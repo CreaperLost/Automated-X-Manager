@@ -30,7 +30,9 @@ const state = {
   previewRevision: 0,
   mediaPreviewPath: null,
   disabledButtons: new Map(),
-  editImagePaths: [],
+  gallery: [],
+  galleryRevision: 0,
+  galleryLimit: 24,
 };
 
 // ---- dom helpers -----------------------------------------------------------
@@ -268,9 +270,7 @@ async function doFetch() {
 function currentBody() { return $("#body-input").value; }
 function currentLink() { return $("#link-input").value; }
 function currentImages() {
-  const sel = $("#media-select").value;
-  if (sel && state.editImagePaths[0] === sel) return [...state.editImagePaths];
-  return sel ? [sel] : [];
+  return [...state.mediaPaths];
 }
 
 function draftFromInputs() {
@@ -318,8 +318,9 @@ async function generate(twoOptions) {
     const body = twoOptions ? (res.option_a || "") : (res.option_a || "");
     $("#body-input").value = body;
     $("#link-input").value = res.cta_text || "";
-    if (res.recommended_media_path) {
-      $("#media-select").value = res.recommended_media_path;
+    if (res.recommended_media_path && !state.mediaPaths.length) {
+      state.mediaPaths = [res.recommended_media_path];
+      renderAttachments();
       banner(`Media suggested: ${res.recommended_media_name}`, "info");
     }
     await refreshPreview();
@@ -430,22 +431,26 @@ async function refreshPreview() {
 }
 
 async function refreshMediaPreview() {
-  const path = $("#media-select").value;
-  if (state.mediaPreviewPath === path) return;
-  state.mediaPreviewPath = path;
-  const img = $("#preview-media");
-  img.hidden = true;
-  img.removeAttribute("src");
+  const paths = currentImages();
+  const signature = JSON.stringify([state.niche, paths]);
+  if (state.mediaPreviewPath === signature) return;
+  state.mediaPreviewPath = signature;
+  const container = $("#preview-media-grid");
+  container.querySelectorAll("video").forEach(video => video.pause());
+  container.replaceChildren();
+  container.hidden = !paths.length;
+  container.classList.toggle("multiple", paths.length > 1);
   $(".preview-caption").textContent = "A preview of your post and follow-up reply.";
-  if (!path) return;
-  try {
-    const data = await invoke("read_media_data_url", { niche: state.niche, path });
-    if (state.mediaPreviewPath !== path) return;
-    img.src = data;
-    img.hidden = false;
-  } catch {
-    if (state.mediaPreviewPath === path) $(".preview-caption").textContent = "Attachment selected. Image preview unavailable.";
-  }
+  await Promise.all(paths.map(async path => {
+    const node = mediaElement(path, true);
+    container.append(node);
+    try {
+      const url = await mediaUrl(path);
+      if (state.mediaPreviewPath === signature) node.src = url;
+    } catch {
+      if (state.mediaPreviewPath === signature) $(".preview-caption").textContent = "Attachment selected, but preview unavailable. Check that the file is still in your library.";
+    }
+  }));
 }
 
 async function saveDraft() {
@@ -562,15 +567,8 @@ function editDraft(d) {
   $("#writing-mode").value = d.writing_mode || "rephrase";
   state.selectedTweet = d.source_tweet_id ? { id: d.source_tweet_id } : null;
   $("#selected-source").replaceChildren(el("p", { class: "empty", text: d.source_tweet_id ? "This draft was created from a saved source." : "This draft starts with your own idea." }));
-  $("#media-select").value = "";
-  state.editImagePaths = [...(d.image_paths || [])];
-  if (d.image_paths?.length) {
-    const path = d.image_paths[0];
-    if (![...$("#media-select").options].some((option) => option.value === path)) {
-      $("#media-select").append(el("option", { value: path, text: path.split(/[\\/]/).pop() }));
-    }
-    $("#media-select").value = path;
-  }
+  state.mediaPaths = [...(d.image_paths || [])];
+  renderAttachments();
   $("#options-panel").hidden = true;
   switchView("create");
   refreshPreview();
@@ -699,25 +697,148 @@ async function saveProjects() {
 // ---- media -----------------------------------------------------------------
 
 async function loadMediaFolders() {
+  const niche = state.niche;
   try {
-    const folders = await invoke("list_project_folders", { niche: state.niche });
+    const folders = await invoke("list_project_folders", { niche });
+    const groups = await Promise.all(folders.map(async project => {
+      const files = await invoke("list_project_media", { niche, projectName: project });
+      return files.map(file => ({ ...file, project }));
+    }));
+    if (niche !== state.niche) return;
     state.projectFolders = folders;
-    const sel = $("#media-select");
-    const previous = sel.value;
-    sel.replaceChildren(el("option", { value: "", text: "No image" }));
-    for (const f of folders) {
-      const files = await invoke("list_project_media", { niche: state.niche, projectName: f });
-      for (const m of files) {
-        sel.append(el("option", { value: m.path, text: `${f} / ${m.filename}` }));
-      }
+    state.gallery = groups.flat();
+    const select = $("#gallery-project");
+    const previous = select.value;
+    select.replaceChildren(el("option", { value: "", text: "All projects" }),
+      ...[...new Set([...folders, ...state.projects.map(p => p.name)])].map(project => el("option", { value: project, text: project })));
+    if ([...select.options].some(option => option.value === previous)) select.value = previous;
+    renderGallery();
+    renderAttachments();
+  } catch (error) {
+    banner(`Could not load the gallery: ${errText(error)}`);
+  }
+}
+
+function isVideo(path) { return /\.(mp4|mov|webm)$/i.test(path); }
+function mediaElement(path, controls = false) {
+  return isVideo(path)
+    ? el("video", { class: "media-visual", controls: controls ? "" : null, preload: "metadata", playsinline: "", muted: controls ? null : "", "aria-label": path.split(/[\\/]/).pop() })
+    : el("img", { class: "media-visual", alt: path.split(/[\\/]/).pop(), loading: "lazy" });
+}
+async function mediaUrl(path) {
+  const allowed = await invoke("prepare_media_preview", { niche: state.niche, path });
+  const convert = window.__TAURI__?.core?.convertFileSrc || window.__TAURI_INTERNALS__?.convertFileSrc;
+  if (!convert) throw new Error("Media preview bridge unavailable");
+  return convert(allowed);
+}
+function toggleAttachment(path) {
+  if (state.busy) return;
+  if (state.mediaPaths.includes(path)) {
+    state.mediaPaths = state.mediaPaths.filter(item => item !== path);
+  } else {
+    if (state.mediaPaths.length && (isVideo(path) || state.mediaPaths.some(isVideo))) {
+      banner("Remove the current attachments before choosing a video. A video must be the only attachment.");
+      return;
     }
-    if (previous) sel.value = previous;
-  } catch { /* media is optional */ }
+    if (state.mediaPaths.length >= 4) { banner("You can attach up to four images."); return; }
+    state.mediaPaths.push(path);
+  }
+  renderAttachments();
+  $$(".gallery-attach").forEach(button => {
+    const selected = state.mediaPaths.includes(button.dataset.path);
+    button.textContent = selected ? "Remove attachment" : "Attach to draft";
+    button.setAttribute("aria-pressed", String(selected));
+  });
+  refreshPreview();
+}
+function renderAttachments() {
+  const list = $("#attachment-list");
+  list.replaceChildren(...state.mediaPaths.map(path => el("span", { class: "attachment-chip" },
+    el("span", { text: `${isVideo(path) ? "Video" : "Image"} · ${path.split(/[\\/]/).pop()}` }),
+    el("button", { type: "button", text: "×", "aria-label": "Remove attachment", onclick: () => toggleAttachment(path) }))));
+  $("#attachment-empty").hidden = !!state.mediaPaths.length;
+  $("#gallery-selection").textContent = `${state.mediaPaths.length} attached to current draft`;
+  $$(".gallery-attach").forEach(button => {
+    const selected = state.mediaPaths.includes(button.dataset.path);
+    button.textContent = selected ? "Remove attachment" : "Attach to draft";
+    button.setAttribute("aria-pressed", String(selected));
+  });
+}
+let galleryObserver;
+function renderGallery() {
+  galleryObserver?.disconnect();
+  const revision = ++state.galleryRevision;
+  const query = $("#gallery-search").value.trim().toLowerCase();
+  const project = $("#gallery-project").value;
+  const type = $("#gallery-type").value;
+  const files = state.gallery.filter(item => (!project || item.project === project)
+    && (!type || isVideo(item.path) === (type === "video"))
+    && `${item.filename} ${item.description} ${item.project}`.toLowerCase().includes(query));
+  $("#gallery-count").textContent = `${files.length} assets`;
+  const grid = $("#gallery-grid");
+  grid.querySelectorAll("video").forEach(video => video.pause());
+  grid.replaceChildren();
+  if (!files.length) grid.append(emptyState("Your media library starts here.", "Choose a project and import images or videos, or adjust your filters."));
+  galleryObserver = new IntersectionObserver(entries => entries.forEach(async entry => {
+    if (!entry.isIntersecting) return;
+    galleryObserver.unobserve(entry.target);
+    const path = entry.target.dataset.path;
+    try {
+      const url = await mediaUrl(path);
+      if (revision === state.galleryRevision) entry.target.src = url;
+    } catch { entry.target.closest(".gallery-card")?.classList.add("preview-unavailable"); }
+  }), { rootMargin: "100px" });
+  for (const item of files.slice(0, state.galleryLimit)) {
+    const visual = mediaElement(item.path, isVideo(item.path));
+    visual.dataset.path = item.path;
+    const description = el("textarea", { class: "input", rows: "2", "aria-label": `Description for ${item.filename}`, placeholder: "Describe this asset for AI matching" });
+    description.value = item.description || "";
+    const save = el("button", { class: "btn btn-quiet", text: "Save description", onclick: async () => {
+      save.disabled = true;
+      try {
+        await invoke("register_media_description", { niche: state.niche, projectName: item.project, filename: item.filename, description: description.value });
+        item.description = description.value.trim();
+        banner("Media description saved.", "info");
+      } catch (error) { banner(errText(error)); }
+      finally { save.disabled = false; }
+    } });
+    const selected = state.mediaPaths.includes(item.path);
+    grid.append(el("article", { class: "gallery-card" },
+      el("div", { class: "gallery-visual" }, visual, el("span", { class: "media-kind", text: isVideo(item.path) ? "VIDEO" : "IMAGE" })),
+      el("div", { class: "gallery-details" }, el("span", { class: "small-label", text: item.project }),
+        el("h3", { text: item.filename }),
+        el("button", { class: "btn gallery-attach", "data-path": item.path, "aria-pressed": String(selected), text: selected ? "Remove attachment" : "Attach to draft", onclick: () => toggleAttachment(item.path) }),
+        el("details", {}, el("summary", { text: "Asset description" }), description, save))));
+    galleryObserver.observe(visual);
+  }
+  $("#gallery-more").hidden = files.length <= state.galleryLimit;
+}
+async function importMedia() {
+  const project = $("#gallery-project").value;
+  if (!project) { banner("Choose a project in the gallery before importing media."); return; }
+  const niche = state.niche;
+  busy(true, "Importing media…");
+  let imported = 0;
+  const failed = [];
+  try {
+    const paths = await invoke("plugin:dialog|open", { options: { multiple: true, title: "Import images and videos", filters: [{ name: "Media", extensions: ["png", "jpg", "jpeg", "gif", "webp", "avif", "mp4", "mov", "webm"] }] } });
+    for (const path of paths ? (Array.isArray(paths) ? paths : [paths]) : []) {
+      try {
+        await invoke("import_media", { niche, projectName: project, sourcePath: path });
+        imported++;
+      } catch (error) { failed.push(errText(error)); }
+    }
+    await loadMediaFolders();
+    if (failed.length) banner(`${imported} imported; ${failed.length} failed. ${failed[0]}`);
+    else if (imported) banner(`${imported} media file${imported === 1 ? "" : "s"} imported. Choose attachments below.`, "info");
+  } catch (error) { banner(`Import failed: ${errText(error)}`); }
+  finally { busy(false); }
 }
 
 // ---- navigation ------------------------------------------------------------
 
 function switchView(view) {
+  if (state.view !== view) $$("video").forEach(video => video.pause());
   state.view = view;
   $$(".view-btn").forEach((b) => {
     const on = b.dataset.view === view;
@@ -730,6 +851,7 @@ function switchView(view) {
     create: ["YOUR WRITING STUDIO", "A little inspiration. Your own voice.", "Shape an idea, make it yours, and see exactly how it will look."],
     queue: ["YOUR PUBLISHING DESK", "Good ideas, ready to go.", "Give your drafts another look, then publish when the moment feels right."],
     settings: ["YOUR WORKSPACE", "Set the stage.", "Manage your creator watchlist and the projects behind your posts."],
+    gallery: ["YOUR MEDIA LIBRARY", "Give your ideas a visual.", "Browse project images and videos, then attach them to your draft."],
   };
   const [eyebrow, title, subtitle] = pages[view] || pages.sources;
   $("#page-eyebrow").textContent = eyebrow;
@@ -750,9 +872,12 @@ function wireEvents() {
     // Keep editor text, but never carry a saved draft ID into another database.
     state.draftId = null;
     state.selectedTweet = null;
-    state.editImagePaths = [];
+    state.mediaPaths = [];
+    state.gallery = [];
+    state.galleryRevision++;
+    galleryObserver?.disconnect();
+    $("#gallery-project").value = "";
     state.mediaPreviewPath = null;
-    $("#media-select").value = "";
     $("#options-panel").hidden = true;
     $("#selected-source").replaceChildren(el("p", { class: "empty", text: "Choose a source from your research desk, or start with your own instructions." }));
     $$(".niche-btn").forEach((x) => {
@@ -806,10 +931,13 @@ function wireEvents() {
 
   $("#body-input").addEventListener("input", refreshPreview);
   $("#link-input").addEventListener("input", refreshPreview);
-  $("#media-select").addEventListener("change", () => {
-    state.editImagePaths = [];
-    refreshPreview();
-  });
+  $$("[data-open-gallery]").forEach(button => button.addEventListener("click", () => switchView("gallery")));
+  $("#btn-import-media").addEventListener("click", importMedia);
+  $("#btn-refresh-gallery").addEventListener("click", loadMediaFolders);
+  $("#gallery-search").addEventListener("input", () => { state.galleryLimit = 24; renderGallery(); });
+  ["#gallery-project", "#gallery-type"].forEach(selector => $(selector).addEventListener("change", () => { state.galleryLimit = 24; renderGallery(); }));
+  $("#gallery-more").addEventListener("click", () => { state.galleryLimit += 24; renderGallery(); });
+  $("#gallery-edit-draft").addEventListener("click", () => { switchView("create"); refreshPreview(); });
 
   $("#btn-auth").addEventListener("click", async () => {
     const button = $("#btn-auth");
